@@ -1,0 +1,12 @@
+2026/05/15 20:25:29 --> JoiPlay--> 64 paths are cached.
+2026/05/15 20:25:29 --> JoiPlay--> Executable File URI = http://127.0.0.1:4263/index.html
+2026/05/15 20:25:30 --> JoiPlay--> Injected NWJSAPI from  line 41136
+2026/05/15 20:25:30 --> JoiPlay--> Injected globals.js from  line 83
+2026/05/15 20:25:49 --> JoiPlay--> Theoretical RTP (20 lines): 42.58% from http://127.0.0.1:4263/paytable.js line 310
+2026/05/15 20:25:51 --> JoiPlay--> Theoretical RTP (20 lines): 42.58% from http://127.0.0.1:4263/paytable.js line 310
+2026/05/15 20:26:24 --> JoiPlay--> 69 paths are cached.
+2026/05/15 20:26:24 --> JoiPlay--> Executable File URI = http://127.0.0.1:4263/index.html
+2026/05/15 20:26:25 --> JoiPlay--> Injected NWJSAPI from  line 41136
+2026/05/15 20:26:25 --> JoiPlay--> Injected globals.js from  line 83
+2026/05/15 20:26:25 --> JoiPlay--> [State] Restored — Balance: $500.00 from http://127.0.0.1:4263/state.js line 150
+2026/05/15 20:31:38 --> JoiPlay--> Theoretical RTP (20 lines): 42.58% from http://127.0.0.1:4263/paytable.js line 310

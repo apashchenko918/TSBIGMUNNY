@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+  <!-- CACHE BUST: Clear old cache API entries (does NOT affect localStorage/game state) -->
+  <script>
+    (function() {
+      // Only delete old cache API entries — never touch localStorage (game state)
+      if ('caches' in window) {
+        caches.keys().then(function(names) {
+          names.forEach(function(name) {
+            if (name !== 'turrelle-v6a') caches.delete(name);
+          });
+        });
+      }
+    })();
+  </script>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<!-- iOS PWA -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Big Munny">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<!-- Android -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#d4af37">
+<meta name="description" content="The Turrelle Sisters Big Munny Slot Machine">
+<meta name="format-detection" content="telephone=no">
+<title>The Turrelle Sisters Big Munny</title>
+<link rel="icon" href="assets/icons/icon-96x96.png">
+<link rel="stylesheet" href="style.css">
+<style>
+/* ── INSERT CASH TO PLAY — reel overlay msg ── */
+#reels-insert-msg {
+  position:absolute;
+  bottom:8px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,0.78);
+  color:#f5d878;
+  font-family:var(--font-display);
+  font-size:12px;letter-spacing:2px;
+  padding:5px 14px;border-radius:20px;
+  border:1px solid rgba(212,175,55,0.5);
+  white-space:nowrap;
+  opacity:0;transition:opacity 0.4s;
+  pointer-events:none;z-index:10;
+}
+#reels-insert-msg.visible { opacity:1; }
+
+/* Exit button */
+#exit-btn {
+  background:none;border:1.5px solid var(--ruby);
+  color:var(--ruby);border-radius:8px;
+  padding:7px 10px;font-size:11px;cursor:pointer;font-weight:700;
+}
+
+/* Jackpot sisters image — hidden by default, shown via .active class in style.css */
+#jackpot-overlay { display:none; }
+
+/* Chrome real viewport height fix */
+#game-wrap { height: var(--real-vh, 100vh); max-height: var(--real-vh, 100vh); }
+html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+* { -webkit-touch-callout: none; }
+/* ── SPLASH SCREEN ── */
+#splash-screen{
+  position:fixed;inset:0;z-index:1000;
+  background:#0a0608;
+  display:flex;flex-direction:column;
+  align-items:stretch;justify-content:flex-start;
+  transition:opacity 0.7s ease;
+  overflow:hidden;
+}
+#splash-screen.fade-out{opacity:0;pointer-events:none;}
+#splash-screen.hidden{display:none;}
+
+#splash-img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  object-position:center top;
+  animation:splashPop 0.6s cubic-bezier(0.22,1,0.36,1) forwards;
+}
+@keyframes splashPop{
+  0%  {transform:scale(0.88);opacity:0;}
+  100%{transform:scale(1);opacity:1;}
+}
+
+#splash-glow{
+  position:absolute;inset:0;
+  background:radial-gradient(ellipse at center,rgba(212,175,55,0.08) 0%,transparent 70%);
+  animation:splashGlow 2s ease-in-out infinite alternate;
+  pointer-events:none;
+}
+@keyframes splashGlow{0%{opacity:0.5;}100%{opacity:1;}}
+
+#splash-tap{
+  position:absolute;bottom:40px;
+  left:50%;transform:translateX(-50%);
+  white-space:nowrap;
+  font-family:var(--font-display);
+  font-size:14px;color:rgba(212,175,55,0.85);
+  letter-spacing:3px;text-transform:uppercase;
+  animation:splashBlink 1.2s ease-in-out infinite;
+}
+@keyframes splashBlink{0%,100%{opacity:1;}50%{opacity:0.25;}}
+
+#splash-particles{
+  position:absolute;inset:0;pointer-events:none;overflow:hidden;
+}
+.sp{
+  position:absolute;
+  width:4px;height:4px;
+  border-radius:50%;
+  background:var(--gold-light);
+  animation:spFloat linear infinite;
+  opacity:0;
+}
+@keyframes spFloat{
+  0%  {transform:translateY(100vh) scale(0);opacity:0;}
+  10% {opacity:0.8;}
+  90% {opacity:0.4;}
+  100%{transform:translateY(-20vh) scale(1.5);opacity:0;}
+}
+
+/* PWA install prompt */
+#install-prompt{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#1a0d2e,#2a1a3e);border:2px solid #d4af37;border-radius:14px;padding:12px 18px;display:none;align-items:center;gap:10px;z-index:300;box-shadow:0 4px 20px rgba(0,0,0,0.8);max-width:90vw;}
+#install-prompt.show{display:flex;}
+#install-prompt img{width:38px;height:38px;border-radius:8px;}
+#install-prompt-text{color:#f5e6c8;font-size:11px;}
+#install-prompt-text strong{color:#d4af37;display:block;font-size:13px;}
+#install-yes{background:#d4af37;color:#0a0608;border:none;border-radius:8px;padding:7px 12px;font-weight:900;cursor:pointer;font-size:12px;}
+#install-no{background:none;border:none;color:#8a7a5a;cursor:pointer;font-size:18px;padding:4px;}
+#update-banner{position:fixed;top:0;left:0;right:0;background:#d4af37;color:#0a0608;padding:8px;text-align:center;font-weight:900;font-size:13px;z-index:400;display:none;cursor:pointer;}
+#update-banner.show{display:block;}
+</style>
+</head>
+<body>
+
+<!-- ── SPLASH SCREEN ── -->
+<div id="splash-screen">
+  <div id="splash-glow"></div>
+  <div id="splash-particles" id="sp-container"></div>
+  <img id="splash-img" src="assets/splash_screen.jpg" alt="The Turrelle Sisters Big Munny">
+  <div id="splash-tap">TAP TO PLAY</div>
+</div>
+
+<div id="install-prompt">
+  <img src="assets/icons/icon-96x96.png" alt="">
+  <div id="install-prompt-text"><strong>Install Big Munny</strong>Play offline, launch like an app!</div>
+  <button id="install-yes">Install</button>
+  <button id="install-no">✕</button>
+</div>
+<div id="update-banner" onclick="location.reload()">🔄 Update available — tap to refresh</div>
+
+<div id="game-wrap">
+  <!-- TITLE — at very top — tap 5× for operator -->
+  <div id="game-title">
+    <img id="title-banner" src="assets/TSistsersBigMunnyTitle.png" alt="The Turrelle Sisters Big Munny">
+  </div>
+
+  <!-- JACKPOT METERS — just above reels -->
+  <div id="jackpot-bar">
+    <div class="jp-meter" id="jp-grand"><div class="jp-label">GRAND</div><div class="jp-amount">$2000.00</div></div>
+    <div class="jp-meter" id="jp-major"><div class="jp-label">MAJOR</div><div class="jp-amount">$100.00</div></div>
+    <div class="jp-meter" id="jp-minor"><div class="jp-label">MINOR</div><div class="jp-amount">$50.00</div></div>
+    <div class="jp-meter" id="jp-mini"><div class="jp-label">MINI</div><div class="jp-amount">$25.00</div></div>
+  </div>
+
+  <!-- REEL SECTION -->
+  <div id="reel-section">
+    <div id="reel-frame">
+      <div id="red-reel-overlay"></div>
+      <div id="reels-insert-msg">💳 INSERT CASH TO PLAY</div>
+      <canvas id="payline-canvas"></canvas>
+      <div id="reels">
+        <div class="reel" id="reel-0"><div class="reel-strip"><div class="symbol-cell" id="sc-0-0"></div><div class="symbol-cell" id="sc-0-1"></div><div class="symbol-cell" id="sc-0-2"></div></div></div>
+        <div class="reel" id="reel-1"><div class="reel-strip"><div class="symbol-cell" id="sc-1-0"></div><div class="symbol-cell" id="sc-1-1"></div><div class="symbol-cell" id="sc-1-2"></div></div></div>
+        <div class="reel" id="reel-2"><div class="reel-strip"><div class="symbol-cell" id="sc-2-0"></div><div class="symbol-cell" id="sc-2-1"></div><div class="symbol-cell" id="sc-2-2"></div></div></div>
+        <div class="reel" id="reel-3"><div class="reel-strip"><div class="symbol-cell" id="sc-3-0"></div><div class="symbol-cell" id="sc-3-1"></div><div class="symbol-cell" id="sc-3-2"></div></div></div>
+        <div class="reel" id="reel-4"><div class="reel-strip"><div class="symbol-cell" id="sc-4-0"></div><div class="symbol-cell" id="sc-4-1"></div><div class="symbol-cell" id="sc-4-2"></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WIN DISPLAY -->
+  <div id="win-section">
+    <div id="win-box"><div id="win-label">WIN</div><div id="win-amount">$0.00</div></div>
+    <div id="bonus-total-box"><div id="bonus-total-label">🔴 BONUS TOTAL</div><div id="bonus-total-amount">$0.00</div></div>
+  </div>
+  <div id="win-line-label"></div>
+
+  <!-- VOLUME BAR -->
+  <div id="volume-bar">
+    <button id="mute-btn">🔊</button>
+    <input id="vol-slider" type="range" min="0" max="100" value="70">
+    <span id="vol-label">70%</span>
+  </div>
+
+  <!-- INFO BAR -->
+  <div id="info-bar">
+    <div class="info-item"><div class="info-label">BALANCE</div><div class="info-value" id="balance-val">$500.00</div></div>
+    <div class="info-item"><div class="info-label">TOTAL BET</div><div class="info-value" id="total-bet-val">$0.05</div></div>
+    <div class="info-item"><div class="info-label">LINES</div><div class="info-value" id="lines-display">20</div></div>
+  </div>
+  <!-- CONTROLS — MLMC Aristocrat VGT style -->
+  <div id="controls">
+
+    <!-- Row 1: Denomination selector (dropdown) -->
+    <div id="denom-row">
+      <span class="ctrl-label">DENOM</span>
+      <div id="denom-selector">
+        <button id="denom-display-btn">5¢ ▾</button>
+        <div id="denom-dropdown">
+          <button class="denom-option" data-denom="0.01">1¢</button>
+          <button class="denom-option" data-denom="0.02">2¢</button>
+          <button class="denom-option active" data-denom="0.05">5¢</button>
+          <button class="denom-option" data-denom="0.10">10¢</button>
+          <button class="denom-option" data-denom="0.25">25¢</button>
+          <button class="denom-option" data-denom="0.50">50¢</button>
+          <button class="denom-option" data-denom="1.00">$1</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Neptune's Gold style bet panel: BET ONE cycles lines 1-20, BET MAX = 20 lines -->
+    <div id="bet-panel">
+      <div id="bet-display">
+        <div class="bet-stat"><span class="bet-label">LINES</span><span id="lines-display2">20</span></div>
+        <div class="bet-stat"><span class="bet-label">CREDITS/LINE</span><span id="credits-line-display">1</span></div>
+        <div class="bet-stat"><span class="bet-label">TOTAL BET</span><span id="total-bet-display2">$1.00</span></div>
+      </div>
+      <div id="bet-buttons">
+        <button id="bet-one-btn">BET ONE</button>
+        <button id="spin-btn">SPIN</button>
+        <button id="bet-max-btn">BET MAX</button>
+      </div>
+      <div id="bet-row2">
+        <button id="paytable-btn">PAYTABLE</button>
+      </div>
+    </div>
+
+    <!-- Row 5: Cash management -->
+    <div id="cash-row">
+      <button id="cashout-btn">💵 CASH OUT</button>
+      <button id="insertcash-btn">💳 INSERT CASH</button>
+      <button id="exit-btn">✕ EXIT</button>
+    </div>
+  </div>
+
+  <!-- Zero balance flash message -->
+  <div id="zero-balance-msg" style="
+    position:absolute;bottom:70px;left:50%;transform:translateX(-50%);
+    background:rgba(180,0,40,0.92);color:#fff;font-family:var(--font-display);
+    font-size:12px;letter-spacing:2px;padding:7px 18px;border-radius:20px;
+    border:1px solid rgba(255,80,80,0.6);white-space:nowrap;
+    opacity:0;transition:opacity 0.4s;pointer-events:none;z-index:10;
+  ">💳 INSERT CASH TO PLAY</div>
+</div>
+
+<!-- BONUS SCREENS -->
+<div id="hold-screen">
+  <div class="bonus-jp-bar" id="hold-jp-bar">
+    <div class="bonus-jp-meter grand"><div class="bonus-jp-label">GRAND</div><div class="bonus-jp-amount" id="hold-jp-grand">$2000.00</div></div>
+    <div class="bonus-jp-meter"><div class="bonus-jp-label">MAJOR</div><div class="bonus-jp-amount" id="hold-jp-major">$100.00</div></div>
+    <div class="bonus-jp-meter"><div class="bonus-jp-label">MINOR</div><div class="bonus-jp-amount" id="hold-jp-minor">$50.00</div></div>
+    <div class="bonus-jp-meter"><div class="bonus-jp-label">MINI</div><div class="bonus-jp-amount" id="hold-jp-mini">$25.00</div></div>
+  </div>
+  <div id="hold-title">HOLD &amp; SPIN</div>
+  <div id="respin-counter">3 RESPINS</div>
+  <div id="hold-board"></div>
+  <div id="hold-total-row"><div id="hold-total-label">BOARD TOTAL</div><div id="hold-total-val">$0.00</div></div>
+</div>
+
+<div id="pick-screen">
+  <div class="bonus-jp-bar" id="pick-jp-bar">
+    <div class="bonus-jp-meter grand"><div class="bonus-jp-label">GRAND</div><div class="bonus-jp-amount" id="pick-jp-grand">$2000.00</div></div>
+    <div class="bonus-jp-meter"><div class="bonus-jp-label">MAJOR</div><div class="bonus-jp-amount" id="pick-jp-major">$100.00</div></div>
+    <div class="bonus-jp-meter"><div class="bonus-jp-label">MINOR</div><div class="bonus-jp-amount" id="pick-jp-minor">$50.00</div></div>
+    <div class="bonus-jp-meter"><div class="bonus-jp-label">MINI</div><div class="bonus-jp-amount" id="pick-jp-mini">$25.00</div></div>
+  </div>
+  <div id="pick-title">💄 PICK &amp; CHOOSE 💄</div>
+  <div id="pick-subtitle">Tap tiles — match 3 to win!</div>
+  <div id="pick-grid"></div>
+  <div id="pick-matches">Match 3 symbols to win!</div>
+</div>
+
+<div id="jackpot-overlay">
+  <img id="jackpot-sisters-img" src="assets/sisters_celebrate.png" alt="The Turrelle Sisters" style="display:none;max-width:85%;max-height:40vh;object-fit:contain;margin-bottom:8px;filter:drop-shadow(0 0 20px rgba(255,215,0,0.6))">
+  <div id="jackpot-type-text">JACKPOT!</div>
+  <div id="jackpot-amount-text">$0.00</div>
+  <div id="jackpot-context-text"></div>
+  <div id="jackpot-tap-hint">TAP TO CONTINUE</div>
+  <div id="jackpot-actions" style="display:none;flex-direction:column;gap:12px;margin-top:16px;width:100%;max-width:280px;">
+    <button id="jackpot-cashout-btn">💵 CASH OUT VOUCHER</button>
+    <button id="jackpot-continue-btn">▶ CONTINUE PLAYING</button>
+  </div>
+</div>
+
+<!-- OPERATOR -->
+<div id="pin-overlay">
+  <div id="pin-box">
+    <div id="pin-title">OPERATOR ACCESS</div>
+    <div id="pin-subtitle">Enter 4-digit PIN</div>
+    <div id="pin-display"></div>
+    <div id="pin-grid">
+      <button class="pin-key" data-val="1">1</button><button class="pin-key" data-val="2">2</button><button class="pin-key" data-val="3">3</button>
+      <button class="pin-key" data-val="4">4</button><button class="pin-key" data-val="5">5</button><button class="pin-key" data-val="6">6</button>
+      <button class="pin-key" data-val="7">7</button><button class="pin-key" data-val="8">8</button><button class="pin-key" data-val="9">9</button>
+      <button class="pin-key" id="pin-clear" data-val="clear">CLR</button>
+      <button class="pin-key" data-val="0">0</button>
+      <button class="pin-key" id="pin-enter" data-val="enter">OK</button>
+    </div>
+    <div id="pin-error"></div>
+  </div>
+</div>
+<div id="op-overlay"><div id="op-panel"></div></div>
+
+<div id="log-screen">
+  <div id="log-header">
+    <span style="font-family:Georgia,serif;color:var(--gold);font-size:16px">📋 EVENT LOG</span>
+    <button id="log-close" style="background:none;border:1.5px solid var(--ruby);color:var(--ruby);padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700">✕</button>
+  </div>
+  <div id="log-tabs">
+    <button class="log-tab active" data-tab="games">LAST 10 GAMES</button>
+    <button class="log-tab" data-tab="events">FULL LOG</button>
+  </div>
+  <div id="log-content"></div>
+  <div id="log-footer">
+    <button class="op-btn" onclick="exportLogAsCSV()">CSV</button>
+    <button class="op-btn" onclick="exportLogAsJSON()">JSON</button>
+    <button class="op-btn danger" onclick="if(confirm('Clear log?')){GameState.eventLog.allEvents=[];GameState.eventLog.games=[];saveState();Operator.showLog('games');}">CLEAR</button>
+  </div>
+</div>
+
+<!-- VOUCHER MODAL -->
+<div id="voucher-modal">
+  <div id="voucher-card">
+    <div id="vc-header">
+      <div id="vc-logo">🎰</div>
+      <div id="vm-casino">Lucky Bitches Casino</div>
+      <div id="vc-tagline">TICKET VOUCHER</div>
+    </div>
+    <div id="vc-body">
+      <div id="vc-thankyou">Thank You For Playing!</div>
+      <div id="vc-amount-label">CREDIT VALUE</div>
+      <div id="vm-amount">$0.00</div>
+      <div id="vm-barcode"></div>
+      <div id="vc-meta">
+        <div>Voucher #: <span id="vm-id">LBC-XXXX-XXXX</span></div>
+        <div>Serial: <span id="vm-serial">---------</span></div>
+        <div>Issued: <span id="vm-issued">--</span></div>
+      </div>
+      <div id="vc-disclaimer">⚠️ NOT REDEEMABLE FOR REAL CASH<br>For entertainment purposes only</div>
+    </div>
+    <div id="vc-footer">
+      <button id="vm-print">✓ SAVE TO WALLET</button>
+      <button id="vm-close">✕ CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<!-- WALLET / INSERT CASH MODAL -->
+<div id="wallet-modal">
+  <div id="wallet-panel">
+    <div id="wallet-header">
+      <div id="wallet-title">💳 INSERT CASH</div>
+      <div id="wallet-subtitle">Select a voucher to play</div>
+    </div>
+    <div id="wallet-list"></div>
+    <div id="wallet-footer">
+      <button id="create-voucher-btn">➕ CREATE VOUCHER</button>
+      <button id="wallet-close">✕ CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<!-- CREATE VOUCHER MODAL -->
+<div id="create-voucher-modal">
+  <div id="cv-panel">
+    <div id="cv-title">💳 CREATE VOUCHER</div>
+    <div id="cv-subtitle">Enter amount to add to wallet</div>
+    <input id="cv-amount-input" type="number" min="1" step="1" placeholder="Enter amount (e.g. 500)">
+    <div id="cv-error" style="display:none;color:#ff6060;font-size:11px;margin-top:4px;"></div>
+    <div id="cv-buttons">
+      <button id="cv-confirm">✓ CREATE</button>
+      <button id="cv-cancel">✕ CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- BONUS LETTER CELEBRATION (shows before orb screen) -->
+<div id="bonus-letter-celebrate" style="display:none;position:fixed;inset:0;z-index:120;background:rgba(0,0,0,0.92);align-items:center;justify-content:center;gap:8px;">
+  <div class="bonus-cel-letter" data-letter="B">B</div>
+  <div class="bonus-cel-letter" data-letter="O">O</div>
+  <div class="bonus-cel-letter" data-letter="N">N</div>
+  <div class="bonus-cel-letter" data-letter="U">U</div>
+  <div class="bonus-cel-letter" data-letter="S">S</div>
+</div>
+
+<!-- BONUS FEATURE ORB SCREEN -->
+<div id="bonus-orb-screen" style="display:none;position:fixed;inset:0;z-index:115;background:radial-gradient(ellipse at center,#1a0d35 0%,#0a0608 100%);flex-direction:column;align-items:center;justify-content:center;padding:20px;">
+  <div id="bonus-orb-header">
+    <div id="bonus-orb-title">B-O-N-U-S!</div>
+    <div id="bonus-orb-subtitle">TAP AN ORB TO REVEAL YOUR BONUS</div>
+  </div>
+  <div id="bonus-orb-container"></div>
+</div>
+
+<!-- PAYTABLE SCREEN -->
+<div id="paytable-screen">
+  <div id="paytable-panel">
+    <div id="paytable-header">
+      <div id="paytable-title">📋 PAYTABLE</div>
+      <div id="paytable-denom-info"></div>
+      <button id="paytable-close">✕</button>
+    </div>
+    <div id="paytable-body"></div>
+  </div>
+</div>
+
+<!-- ADDITIONAL RED SPINS BANNER -->
+<div id="additional-rs-banner" style="display:none;position:fixed;inset:0;z-index:125;background:rgba(180,0,0,0.85);align-items:center;justify-content:center;flex-direction:column;pointer-events:none;">
+  <div id="additional-rs-text">ADDITIONAL RED SPINS WON!</div>
+  <div id="additional-rs-sub">Get Ready...</div>
+</div>
+
+<div id="toast"></div>
+<div id="replay-banner"></div>
+<div id="replay-watermark"><span>AUDIT MODE</span></div>
+
+<!-- SCRIPTS — load order matters -->
+<script src="paytable.js"></script>
+<script src="state.js"></script>
+<script src="audio.js"></script>
+<script src="game.js"></script>
+<script src="bonuses.js"></script>
+<script src="ui.js"></script>
+<script src="operator.js"></script>
+<script src="cashout.js"></script>
+
+<script>
+'use strict';
+
+// ══════════════════════════════════════════════════════════════════════
+// SPLASH SCREEN — ultra-simple, maximum browser compatibility
+// No particles, no async, no template literals, no window.Audio
+// Works on Chrome, Opera, Android WebView, emulators
+(function() {
+  var splash = document.getElementById('splash-screen');
+  if (!splash) return;
+
+  var dismissed = false;
+  var fadeTimer  = null;
+
+  // Wire listeners immediately — don't wait for image
+  splash.addEventListener('click',    onTap);
+  splash.addEventListener('touchend', onTap);
+  // NOTE: No touchstart — it blocks audio unlock gesture on Android
+  // NOTE: No preventDefault — needed for audio to work on mobile
+
+  // Hard failsafe — always exits after 8 seconds even with zero interaction
+  setTimeout(function() { dismiss(false); }, 8000);
+
+  function onTap() {
+    dismiss(true);
+  }
+
+  // Preload splash audio immediately on script run (before any tap)
+  var splashSnd = document.createElement('audio');
+  splashSnd.src = 'assets/audio/splash_welcome.wav';
+  splashSnd.preload = 'auto';
+  splashSnd.volume = 0.85;
+  splashSnd.load();
+
+  function dismiss(fromGesture) {
+    if (dismissed) return;
+    dismissed = true;
+
+    // Unlock Web Audio engine
+    try { if (typeof Audio !== 'undefined' && Audio.resume) Audio.resume(); } catch(e) {}
+
+    if (fromGesture) {
+      var faded = false;
+      var guard = setTimeout(function() {
+        if (!faded) { faded = true; doFade(); }
+      }, 4000);
+
+      try {
+        splashSnd.currentTime = 0; // Reset to start
+        splashSnd.onended = function() {
+          if (!faded) { faded = true; clearTimeout(guard); doFade(); }
+        };
+        splashSnd.onerror = function() {
+          if (!faded) { faded = true; clearTimeout(guard); doFade(); }
+        };
+        var p = splashSnd.play();
+        if (p && p.catch) {
+          p.catch(function() {
+            if (!faded) { faded = true; clearTimeout(guard); doFade(); }
+          });
+        }
+      } catch(err) {
+        clearTimeout(guard);
+        if (!faded) { faded = true; doFade(); }
+      }
+    } else {
+      doFade();
+    }
+  }
+
+  function doFade() {
+    try {
+      if (typeof Audio !== 'undefined' && Audio.startAmbientMusic) {
+        setTimeout(function() { try { Audio.startAmbientMusic(); } catch(e) {} }, 500);
+      }
+    } catch(e) {}
+    splash.style.opacity = '0';
+    splash.style.transition = 'opacity 0.7s ease';
+    splash.style.pointerEvents = 'none';
+    setTimeout(function() { splash.style.display = 'none'; }, 750);
+  }
+})();
+
+// ── SERVICE WORKER — HTTPS/localhost only ────────────────────────────
+// HTTP local servers (192.168.x.x) skip this entirely — no errors
+// Only registers on HTTPS or localhost
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./service-worker.js').then(function(reg) {
+    reg.update();
+  }).catch(function() {});
+}
+
+// ── PWA INSTALL PROMPT (Android Chrome over HTTPS) ────────────────────
+var deferredInstall = null;
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault();
+  deferredInstall = e;
+  setTimeout(function() {
+    if (deferredInstall) { var _ip=document.getElementById('install-prompt'); if(_ip) _ip.classList.add('show'); }
+  }, 20000);
+});
+var _iy=document.getElementById('install-yes'); if(_iy) _iy.addEventListener('click', async function() {
+  var _ipr=document.getElementById('install-prompt'); if(_ipr) _ipr.classList.remove('show');
+  if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; }
+});
+var _in=document.getElementById('install-no'); if(_in) _in.addEventListener('click', function() {
+  var _ipr=document.getElementById('install-prompt'); if(_ipr) _ipr.classList.remove('show');
+  deferredInstall = null;
+});
+
+// ── CHROME / iOS HEIGHT FIX ───────────────────────────────────────────
+function setRealVH() {
+  // Use visualViewport when available (most accurate for Chrome with address bar)
+  var h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty('--real-vh', h + 'px');
+}
+setRealVH();
+window.addEventListener('resize', setRealVH);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', setRealVH);
+window.addEventListener('orientationchange', function() { setTimeout(setRealVH, 100); setTimeout(setRealVH, 400); });
+
+// ── PREVENT SCROLL/BOUNCE — but NOT in scrollable areas ──────────────
+document.addEventListener('touchmove', function(e) {
+  var target = e.target;
+  // .closest() fallback for older Android
+  var el = target;
+  var scrollable = false;
+  while (el && el !== document.body) {
+    var id = el.id || '';
+    if (id === 'log-content' || id === 'op-panel' || id === 'op-overlay') {
+      scrollable = true; break;
+    }
+    el = el.parentElement;
+  }
+  if (!scrollable) e.preventDefault();
+}, { passive: false });
+
+// ── PREVENT CONTEXT MENU ──────────────────────────────────────────────
+document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
+// ── NOTE: Double-tap zoom prevention REMOVED ──────────────────────────
+// It was blocking the 5-tap operator access sequence.
+// iOS zoom is prevented by maximum-scale=1.0 in the viewport meta tag instead.
+
+// ── ANDROID BACK BUTTON ───────────────────────────────────────────────
+history.pushState(null, '', window.location.href);
+window.addEventListener('popstate', function(e) {
+  // Check all overlays — back button closes whichever is open
+  // Operator panel check (no pushState needed — just check if open)
+  var opOverlay = document.getElementById('op-overlay');
+  if (opOverlay && opOverlay.classList.contains('active')) {
+    opOverlay.classList.remove('active');
+    if (typeof GameState !== 'undefined') GameState.operator.panelOpen = false;
+    history.pushState(null, '', window.location.href); // Stay on page
+    return;
+  }
+  // Other overlays
+  var overlays = ['log-screen','pin-overlay','jackpot-overlay'];
+  for (var _pi = 0; _pi < overlays.length; _pi++) {
+    var el = document.getElementById(overlays[_pi]);
+    if (el && el.classList.contains('active')) {
+      el.classList.remove('active');
+      history.pushState(null, '', window.location.href);
+      return;
+    }
+  }
+  // Nothing open — prevent navigation away
+  history.pushState(null, '', window.location.href);
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// MAIN GAME INIT — MLMC Aristocrat VGT style
+// ══════════════════════════════════════════════════════════════════════
+(function(){
+  function $(id) { return document.getElementById(id); }
+
+  // MLMC state
+  var denom          = DEFAULT_DENOM;           // current denomination
+  var creditsPerLine = DEFAULT_CREDITS_PER_LINE;// credits bet per line
+  var lines          = DEFAULT_LINES;           // active paylines
+  var autoRemaining  = 0, autoStartBalance   = 0;
+
+  // Load saved state
+  loadState();
+  if (!GameState.stats.sessionStart) GameState.stats.sessionStart = Date.now();
+  denom          = GameState.lastDenom          || DEFAULT_DENOM;
+  creditsPerLine = GameState.lastCreditsPerLine || DEFAULT_CREDITS_PER_LINE;
+  lines          = GameState.lastLines          || DEFAULT_LINES;
+
+  // Apply denom-correct jackpot seeds after state is loaded
+  if (typeof getJackpotSeedsForDenom !== 'undefined') {
+    var _initSeeds = getJackpotSeedsForDenom(denom);
+    Object.keys(_initSeeds).forEach(function(tier) {
+      if (GameState.jackpots[tier]) {
+        GameState.jackpots[tier].seed = _initSeeds[tier];
+        if (GameState.jackpots[tier].current < _initSeeds[tier]) {
+          GameState.jackpots[tier].current = _initSeeds[tier];
+        }
+      }
+    });
+  }
+
+  // ── ZERO BALANCE AUTO-RESTORE ─────────────────────────────────────────
+  // If balance is $0 and there are no redeemable vouchers, restore starting credits.
+  // This prevents the game from being permanently stuck in an unplayable state.
+  if (GameState.balance <= 0) {
+    var voucherList = CashOut.loadVouchers();
+  var hasVouchers = false;
+  for (var _vi=0;_vi<voucherList.length;_vi++){if(voucherList[_vi].status==='active'){hasVouchers=true;break;}}
+    if (!hasVouchers) {
+      GameState.balance = GameState.operator.startingBalance || DEFAULT_BALANCE;
+      saveState();
+    }
+  }
+
+  // Save state on every possible exit path
+  window.addEventListener('beforeunload', function() { saveState(); });
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden') saveState();
+  });
+  window.addEventListener('pagehide', function() { saveState(); });
+
+  // Init subsystems
+  Audio.init();
+  UI.init();
+  Operator.init();
+  CashOut.init();
+  initVolume();
+  refreshDisplays();
+
+  // Render initial grid
+  var s0 = REEL_STRIPS.map(function(s) { return Math.floor(Math.random() * s.length); });
+  UI.renderGrid(buildGrid(s0));
+
+  // Unlock audio on first gesture (required on iOS and Android)
+  var unlockAudio = function() {
+    Audio.resume();
+    setTimeout(function() { Audio.startAmbientMusic(); }, 500);
+  };
+  document.addEventListener('touchstart', unlockAudio, { once:true, passive:true });
+  document.addEventListener('click',      unlockAudio, { once:true });
+
+  function refreshDisplays() {
+    UI.updateBalance(GameState.balance);
+    UI.updateJackpotMeters();
+    updateBetLine();
+  }
+
+  function updateBetLine() {
+    // MLMC: betPerLine = denom × creditsPerLine (always 1 credit/line per confirmed design)
+    var betPerLine = Math.round(denom * creditsPerLine * 100) / 100;
+    var totalBet   = Math.round(betPerLine * lines * 100) / 100;
+
+    if ($('total-bet-val'))      $('total-bet-val').textContent      = '$' + totalBet.toFixed(2);
+    if ($('lines-display'))      $('lines-display').textContent      = lines;
+    if ($('lines-display2'))     $('lines-display2').textContent     = lines;
+    if ($('total-bet-display2')) $('total-bet-display2').textContent = '$' + totalBet.toFixed(2);
+    // Update BET ONE button to show current line count
+    var betOneBtn = $('bet-one-btn');
+    if (betOneBtn) betOneBtn.textContent = 'BET ONE (' + lines + ')';
+    var credLineDisp = $('credits-line-display');
+    if (credLineDisp) credLineDisp.textContent = creditsPerLine;
+
+    // Highlight active buttons (legacy line-btns if any remain)
+    document.querySelectorAll('.line-btn').forEach(function(b) {
+      b.classList.toggle('active', parseInt(b.dataset.lines) === lines);
+    });
+    document.querySelectorAll('.denom-option').forEach(function(b) {
+      b.classList.toggle('active', parseFloat(b.dataset.denom) === denom);
+    });
+    // Update dropdown button label
+    var denomBtn = $('denom-display-btn');
+    if (denomBtn) {
+      var denomOptions = document.querySelectorAll('.denom-option');
+      for (var _di = 0; _di < denomOptions.length; _di++) {
+        if (parseFloat(denomOptions[_di].getAttribute('data-denom')) === denom) {
+          denomBtn.textContent = denomOptions[_di].textContent + ' v';
+          break;
+        }
+      }
+    }
+    document.querySelectorAll('.credits-btn').forEach(function(b) {
+      b.classList.toggle('active', parseInt(b.dataset.credits) === creditsPerLine);
+    });
+
+    GameState.lastBet            = betPerLine;
+    GameState.lastLines          = lines;
+    GameState.lastDenom          = denom;
+    GameState.lastCreditsPerLine = creditsPerLine;
+  }
+
+  // ── VOLUME ────────────────────────────────────────────────────────
+  function initVolume() {
+    var slider=$('vol-slider'), muteBtn=$('mute-btn'), label=$('vol-label');
+    if (!slider) return;
+    slider.style.setProperty('--vol','70%');
+    slider.addEventListener('input', function() {
+      var v = parseInt(slider.value);
+      Audio.setVolume(v / 100);
+      if (label) label.textContent = v + '%';
+      slider.style.setProperty('--vol', v + '%');
+      if (muteBtn) { muteBtn.textContent = v===0?'🔇':'🔊'; muteBtn.classList.toggle('muted',v===0); }
+    });
+    if (muteBtn) muteBtn.addEventListener('click', function() {
+      var muted = Audio.toggleMute();
+      muteBtn.textContent = muted?'🔇':'🔊';
+      muteBtn.classList.toggle('muted',muted);
+      if (label) label.textContent = muted?'OFF':parseInt(slider.value)+'%';
+    });
+  }
+
+  // ── BET PANEL — Neptune's Gold style ─────────────────────────────
+  // BET ONE: each tap adds 1 line (1→2→3...→20→back to 1)
+  // BET MAX: jumps to 20 lines
+  var _betOneBtn = $('bet-one-btn');
+  if (_betOneBtn) _betOneBtn.addEventListener('click', function() {
+    if (GameState.spinInProgress || GameState.activeBonus) return;
+    lines = (lines >= 20) ? 1 : lines + 1;
+    updateBetLine(); Audio.play('button_click');
+  });
+  var _betMaxBtn = $('bet-max-btn');
+  if (_betMaxBtn) _betMaxBtn.addEventListener('click', function() {
+    if (GameState.spinInProgress || GameState.activeBonus) return;
+    lines = 20;
+    updateBetLine(); Audio.play('button_click');
+  });
+  // Legacy line-btns support
+  document.querySelectorAll('.line-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (GameState.spinInProgress) return;
+      lines = parseInt(btn.dataset.lines);
+      updateBetLine(); Audio.play('button_click');
+    });
+  });
+
+  // ── DENOM DROPDOWN ────────────────────────────────────────────────
+  var denomDisplayBtn = $('denom-display-btn');
+  var denomDropdown   = $('denom-dropdown');
+
+  // Toggle dropdown open/close
+  if (denomDisplayBtn) denomDisplayBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (GameState.spinInProgress) return;
+    if (denomDropdown) denomDropdown.classList.toggle('open');
+    Audio.play('button_click');
+  });
+
+  // Close dropdown when tapping elsewhere
+  document.addEventListener('click', function() {
+    if (denomDropdown) denomDropdown.classList.remove('open');
+  });
+
+  // Denom option selected
+  document.querySelectorAll('.denom-option').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (GameState.spinInProgress) return;
+      denom = parseFloat(btn.dataset.denom);
+      document.querySelectorAll('.denom-option').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      var label = btn.textContent;
+      if (denomDisplayBtn) denomDisplayBtn.textContent = label + ' ▾';
+      if (denomDropdown) denomDropdown.classList.remove('open');
+      // Update jackpot seeds for new denomination
+      if (typeof getJackpotSeedsForDenom !== 'undefined') {
+        var newSeeds = getJackpotSeedsForDenom(denom);
+        Object.keys(newSeeds).forEach(function(tier) {
+          if (GameState.jackpots[tier]) {
+            GameState.jackpots[tier].seed    = newSeeds[tier];
+            // Only reset current if below new seed (never reduce jackpot mid-session)
+            if (GameState.jackpots[tier].current < newSeeds[tier]) {
+              GameState.jackpots[tier].current = newSeeds[tier];
+            }
+          }
+        });
+        UI.updateJackpotMeters();
+        saveState();
+      }
+      updateBetLine();
+      Audio.play('button_click');
+    });
+  });
+
+  // ── CREDITS PER LINE ──────────────────────────────────────────────
+  document.querySelectorAll('.credits-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (GameState.spinInProgress) return;
+      creditsPerLine = parseInt(btn.dataset.credits);
+      updateBetLine(); Audio.play('button_click');
+    });
+  });
+
+  // ── BET ───────────────────────────────────────────────────────────
+  // Old bet-up/down removed — replaced by denom pills and credits buttons
+  var _mb=$('max-bet-btn'); if(_mb) _mb.addEventListener('click', function() {
+    if (GameState.spinInProgress) return;
+    denom = 1.00; creditsPerLine = 10; lines = 20;
+    updateBetLine(); Audio.play('button_click');
+  });
+
+  // ── SPIN + SKIP — 2-tap rule ─────────────────────────────────────
+  // Tap 1: If animations running → complete them (skip to end of current spin result)
+  // Tap 2: Once animations done and spin idle → start next spin
+  // This prevents player disputes from accidental double-tap
+  var _animationsSkipped = false; // tracks if tap1 already fired
+
+  var _sb=$('spin-btn'); if(_sb) _sb.addEventListener('click', function() {
+    // Active bonus — ignore spin button
+    if (GameState.activeBonus) return;
+
+    // Tap 1A: Credit countup animation → skip it (not queuing next spin yet)
+    if (UI.isAnimatingCredits) {
+      UI.skipCreditAnimation();
+      _animationsSkipped = true;
+      return;
+    }
+
+    // Tap 1B: Payline animations running → skip to end, show final result
+    // Do NOT start next spin yet — player must tap again
+    if (GameState.spinInProgress) {
+      if (typeof setSkipPaylineAnimations !== 'undefined') setSkipPaylineAnimations(true);
+      _animationsSkipped = true;
+      return; // Wait for 2nd tap to start next spin
+    }
+
+    // Spin is idle — start next spin (this is always safe as tap 2)
+    _animationsSkipped = false;
+    doSpin();
+  });
+
+  async function doSpin() {
+    if (GameState.spinInProgress || GameState.replayMode) return;
+    var betPerLine = Math.round(denom * creditsPerLine * 100) / 100;
+    var total      = Math.round(betPerLine * lines * 100) / 100;
+    if (GameState.balance <= 0) { CashOut.startZeroBalanceFlash(); UI.showToast('INSERT CASH TO PLAY'); return; }
+    if (GameState.balance < total) { UI.showToast('Insufficient balance!'); return; }
+    Audio.play('button_click');
+    await executeSpin(betPerLine, lines, denom, creditsPerLine);
+    refreshDisplays();
+    // balance display updated by UI.updateBalance which manages ticker automatically
+
+    if (autoRemaining > 0) {
+      autoRemaining--;
+      updateAutoBtn();
+      var op   = GameState.operator;
+      var lost = autoStartBalance - GameState.balance;
+      var won  = GameState.balance - autoStartBalance;
+      if (op.autoPlayLossLimit>0 && lost>=op.autoPlayLossLimit) { stopAuto(); UI.showToast('Auto: Loss limit'); return; }
+      if (op.autoPlayWinLimit >0 && won >=op.autoPlayWinLimit)  { stopAuto(); UI.showToast('Auto: Win limit');  return; }
+      if (autoRemaining > 0) setTimeout(doSpin, 800);
+      else stopAuto();
+    }
+  }
+
+  // ── AUTO ──────────────────────────────────────────────────────────
+  // ── PAYTABLE — reads live from PAY_TABLE + SYMBOLS ───────────────
+  function buildPaytable() {
+    var body = document.getElementById('paytable-body');
+    if (!body) return;
+    var info = document.getElementById('paytable-denom-info');
+    var dl = denom >= 1 ? ('$' + denom.toFixed(2)) : (Math.round(denom*100) + 'c');
+    var bpl = Math.round(denom * creditsPerLine * 100) / 100;
+    if (info) info.textContent = dl + ' x ' + creditsPerLine + ' cr = $' + bpl.toFixed(2) + '/line';
+
+    // Helper: render N symbol images in a row
+    function symImgs(file, count) {
+      var imgs = '';
+      for (var i = 0; i < count; i++) {
+        imgs += '<img src="' + file + '" class="pt-sym-img" alt="">';
+      }
+      return '<div class="pt-sym-imgs">' + imgs + '</div>';
+    }
+    function ptRow(file, count, pays, note, divider) {
+      var cash = Math.round(pays * creditsPerLine * denom * 100) / 100;
+      var cls = 'pt-row' + (divider ? ' pt-divider' : '');
+      var noteHtml = note ? ' <span class="pt-note-inline">' + note + '</span>' : '';
+      return '<div class="' + cls + '">' +
+             '<div class="pt-col-sym">' + symImgs(file, count) + noteHtml + '</div>' +
+             '<div class="pt-col-cr">' + pays + '</div>' +
+             '<div class="pt-col-ca">$' + cash.toFixed(2) + '</div>' +
+             '</div>';
+    }
+    function ptRowCash(file, count, cashVal, label, note, divider) {
+      var cls = 'pt-row' + (divider ? ' pt-divider' : '');
+      var noteHtml = note ? ' <span class="pt-note-inline">' + note + '</span>' : '';
+      return '<div class="' + cls + '">' +
+             '<div class="pt-col-sym">' + symImgs(file, count) + noteHtml + '</div>' +
+             '<div class="pt-col-cr">' + label + '</div>' +
+             '<div class="pt-col-ca">' + cashVal + '</div>' +
+             '</div>';
+    }
+
+    // Read live pay values from PAY_TABLE
+    var PT = PAY_TABLE;
+    var S = SYMBOLS;
+
+    var html = '<div class="pt-header-row"><div class="pt-col-sym">COMBINATION</div><div class="pt-col-cr">CREDITS</div><div class="pt-col-ca">CASH WIN</div></div><div class="pt-rows">';
+
+    // Sisters
+    html += ptRow(S.SISTERS.file, 5, PT.SISTERS[0], 'GRAND JP', true);
+    html += ptRow(S.SISTERS.file, 4, PT.SISTERS[1], '');
+    html += ptRow(S.SISTERS.file, 3, PT.SISTERS[2], '');
+    // Josie
+    html += ptRow(S.JOSIE.file, 5, PT.JOSIE[0], 'WILD x4 / MINOR JP', true);
+    html += ptRow(S.JOSIE.file, 4, PT.JOSIE[1], '');
+    html += ptRow(S.JOSIE.file, 3, PT.JOSIE[2], '');
+    // Sasha
+    html += ptRow(S.SASHA.file, 5, PT.SASHA[0], 'WILD x2 / MINI JP', true);
+    html += ptRow(S.SASHA.file, 4, PT.SASHA[1], '');
+    html += ptRow(S.SASHA.file, 3, PT.SASHA[2], '');
+    // Stray Pup
+    html += ptRow(S.STRAYPUP.file, 5, PT.STRAYPUP[0], '', true);
+    html += ptRow(S.STRAYPUP.file, 4, PT.STRAYPUP[1], '');
+    html += ptRow(S.STRAYPUP.file, 3, PT.STRAYPUP[2], '');
+    // DJ Maxine
+    html += ptRow(S.DJ_MAXINE.file, 5, PT.DJ_MAXINE[0], '', true);
+    html += ptRow(S.DJ_MAXINE.file, 4, PT.DJ_MAXINE[1], '');
+    html += ptRow(S.DJ_MAXINE.file, 3, PT.DJ_MAXINE[2], '');
+    // Seven
+    html += ptRow(S.SEVEN.file, 5, PT.SEVEN[0], '', true);
+    html += ptRow(S.SEVEN.file, 4, PT.SEVEN[1], '');
+    html += ptRow(S.SEVEN.file, 3, PT.SEVEN[2], '');
+    // Diamond
+    html += ptRow(S.DIAMOND.file, 5, PT.DIAMOND[0], '', true);
+    html += ptRow(S.DIAMOND.file, 4, PT.DIAMOND[1], '');
+    html += ptRow(S.DIAMOND.file, 3, PT.DIAMOND[2], '');
+    // Triple Bar
+    html += ptRow(S.TRIPLE_BAR.file, 5, PT.TRIPLE_BAR[0], '', true);
+    html += ptRow(S.TRIPLE_BAR.file, 4, PT.TRIPLE_BAR[1], '');
+    html += ptRow(S.TRIPLE_BAR.file, 3, PT.TRIPLE_BAR[2], '');
+    // Double Bar
+    html += ptRow(S.DOUBLE_BAR.file, 5, PT.DOUBLE_BAR[0], '', true);
+    html += ptRow(S.DOUBLE_BAR.file, 4, PT.DOUBLE_BAR[1], '');
+    html += ptRow(S.DOUBLE_BAR.file, 3, PT.DOUBLE_BAR[2], '');
+    // Single Bar
+    html += ptRow(S.SINGLE_BAR.file, 5, PT.SINGLE_BAR[0], '', true);
+    html += ptRow(S.SINGLE_BAR.file, 4, PT.SINGLE_BAR[1], '');
+    html += ptRow(S.SINGLE_BAR.file, 3, PT.SINGLE_BAR[2], '');
+    // Cherry (any row)
+    html += ptRow(S.CHERRY.file, 5, PT.CHERRY[0], 'ANY ROW', true);
+    html += ptRow(S.CHERRY.file, 4, PT.CHERRY[1], 'ANY ROW');
+    html += ptRow(S.CHERRY.file, 3, PT.CHERRY[2], 'ANY ROW');
+    html += ptRow(S.CHERRY.file, 2, PT.CHERRY[3], 'ANY ROW');
+    html += ptRow(S.CHERRY.file, 1, PT.CHERRY[3], 'ANY ROW');
+    // Mixed Bar
+    html += ptRowCash(S.SINGLE_BAR.file, 5, '$' + (Math.round(35 * bpl * 100)/100).toFixed(2), '35x/line', 'ANY MIX', true);
+    // Lipstick
+    html += ptRowCash(S.LIPSTICK.file, 5, 'BONUS', '—', 'PICK &amp; CHOOSE', true);
+    html += ptRow(S.LIPSTICK.file, 4, PT.LIPSTICK[1], '');
+    html += ptRow(S.LIPSTICK.file, 3, PT.LIPSTICK[2], '');
+    html += '</div>';
+    html += '<div class="pt-section-note">JACKPOTS — ANY ACTIVE PAYLINE</div>';
+    html += '<div class="pt-jp-row"><span class="pt-jp-mini">MINI</span><span>5 Sasha on any active payline</span></div>';
+    html += '<div class="pt-jp-row"><span class="pt-jp-minor">MINOR</span><span>5 Josie on any active payline</span></div>';
+    html += '<div class="pt-jp-row"><span class="pt-jp-major">MAJOR</span><span>Reserved</span></div>';
+    html += '<div class="pt-jp-row"><span class="pt-jp-grand">GRAND</span><span>5 Sisters on any active payline</span></div>';
+    html += '<div class="pt-footer-note">Credits Won x Credits/Line x Denom = Cash</div>';
+    html += '<div class="pt-footer-note">Sasha wild x2 | Josie wild x4 | Both together x6</div>';
+    body.innerHTML = html;
+    body.scrollTop = 0;
+  }
+
+  var _ptb=$('paytable-btn'); if(_ptb) _ptb.addEventListener('click', function() {
+    buildPaytable();
+    var _pts=$('paytable-screen'); if(_pts) _pts.classList.add('active');
+    // Push state so Android back button can be intercepted
+    history.pushState({ paytable: true }, '');
+    Audio.play('button_click');
+  });
+  var _ptc=$('paytable-close'); if(_ptc) _ptc.addEventListener('click', function() {
+    var _pts2=$('paytable-screen'); if(_pts2) _pts2.classList.remove('active');
+    // Clean up history state
+    if (history.state && history.state.paytable) history.back();
+    Audio.play('button_click');
+  });
+  // Intercept Android back button when paytable is open
+  window.addEventListener('popstate', function(e) {
+    var _pts3=$('paytable-screen');
+    if (_pts3 && _pts3.classList.contains('active')) {
+      // Push state again to prevent navigation — only X button closes paytable
+      history.pushState({ paytable: true }, '');
+    }
+  });
+
+  // ── EXIT BUTTON — returns player to splash screen ───────────────────
+  var _eb=$('exit-btn'); if(_eb) _eb.addEventListener('click', function() {
+    if (GameState.spinInProgress || GameState.activeBonus) {
+      UI.showToast('Please wait for current game to finish');
+      return;
+    }
+    saveState();
+    Audio.stopAmbientMusic();
+    // Show splash screen — player can tap to re-enter game
+    var splash = document.getElementById('splash-screen');
+    var gameWrap = document.getElementById('game-wrap');
+    if (splash && gameWrap) {
+      gameWrap.style.display = 'none';
+      splash.style.display = 'flex';
+      splash.classList.remove('hidden');
+      // Re-attach splash dismiss handler so player can tap back in
+      var splashDismissed = false;
+      function reEnterGame() {
+        if (splashDismissed) return;
+        splashDismissed = true;
+        splash.style.display = 'none';
+        gameWrap.style.display = '';
+        Audio.startAmbientMusic();
+      }
+      splash.addEventListener('click', reEnterGame, { once: true });
+      splash.addEventListener('touchend', reEnterGame, { once: true });
+    }
+  });
+
+  var _ab=$('auto-btn'); if(_ab) _ab.addEventListener('click', function() {
+    if (autoRemaining > 0) { stopAuto(); return; }
+    autoRemaining    = GameState.operator.autoPlaySpins || 10;
+    autoStartBalance = GameState.balance;
+    updateAutoBtn(); doSpin();
+  });
+  function stopAuto() { autoRemaining=0; updateAutoBtn(); }
+  function updateAutoBtn() {
+    var btn=$('auto-btn'); if(!btn) return;
+    btn.textContent = autoRemaining>0 ? 'STOP (' + autoRemaining + ')' : 'AUTO';
+    btn.classList.toggle('active', autoRemaining>0);
+  }
+
+  // ── LOG TABS ──────────────────────────────────────────────────────
+  document.querySelectorAll('.log-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      document.querySelectorAll('.log-tab').forEach(function(t){t.classList.remove('active');});
+      tab.classList.add('active');
+      if (typeof Operator !== 'undefined' && Operator.showLog) Operator.showLog(tab.dataset.tab);
+    });
+  });
+  var _lc=$('log-close'); if(_lc) _lc.addEventListener('click', function() { var _ls=$('log-screen'); if(_ls) _ls.classList.remove('active'); });
+
+  // ── PERSIST ───────────────────────────────────────────────────────
+  document.addEventListener('visibilitychange', function() { if(document.hidden) saveState(); });
+  window.addEventListener('beforeunload', function() { saveState(); });
+  window.addEventListener('pagehide',     function() { saveState(); }); // iOS
+
+  setInterval(function() { UI.updateJackpotMeters(); }, 4000);
+})();
+</script>
+</body>
+</html>

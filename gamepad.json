@@ -1,0 +1,74 @@
+{
+    "buttons": [
+        {
+            "id": "32806ab2-0539-46fc-b05f-3306c07a43f4",
+            "centerX": 0.79581475,
+            "centerY": 0.86153847,
+            "width": 0.11266667,
+            "height": 0.05538461,
+            "color": -12303292,
+            "alpha": 180,
+            "keyCode": 66,
+            "label": "ENTER",
+            "shape": "CIRCLE",
+            "cornerRadius": 0.017076923,
+            "isUndeletable": false,
+            "isUnmovable": false
+        },
+        {
+            "id": "c2ec3e45-a461-4034-aeee-69cf9fef26d9",
+            "centerX": 0.927,
+            "centerY": 0.86153847,
+            "width": 0.11266667,
+            "height": 0.05538461,
+            "color": -12303292,
+            "alpha": 180,
+            "keyCode": 111,
+            "label": "ESCAPE",
+            "shape": "CIRCLE",
+            "cornerRadius": 0.017076923,
+            "isUndeletable": false,
+            "isUnmovable": false
+        },
+        {
+            "id": "0d9dcc6b-243c-49a8-a545-9ed389fbc13c",
+            "centerX": 0.79581475,
+            "centerY": 0.93676925,
+            "width": 0.11266667,
+            "height": 0.05538461,
+            "color": -12303292,
+            "alpha": 180,
+            "keyCode": 54,
+            "label": "Z",
+            "shape": "CIRCLE",
+            "cornerRadius": 0.017076923,
+            "isUndeletable": false,
+            "isUnmovable": false
+        },
+        {
+            "id": "f0461639-4787-4fba-b942-414436bf1888",
+            "centerX": 0.927,
+            "centerY": 0.93676925,
+            "width": 0.11266667,
+            "height": 0.05538461,
+            "color": -12303292,
+            "alpha": 180,
+            "keyCode": 30,
+            "label": "B",
+            "shape": "CIRCLE",
+            "cornerRadius": 0.017076923,
+            "isUndeletable": false,
+            "isUnmovable": false
+        }
+    ],
+    "joystick": {
+        "centerX": 0.19907407,
+        "centerY": 0.9039999,
+        "outerCircleRadius": 0.091880344,
+        "knobRadius": 0.04017094,
+        "alpha": 180,
+        "color": -12303292,
+        "dPadMode": true
+    },
+    "orientation": 7
+}
