@@ -1,16 +1,15 @@
 'use strict';
-const UI = (() => {
-  const $ = id => document.getElementById(id);
-  let reelEls=[], paylineCanvas=null, paylineCtx=null;
-  let pickTapCb = null;
-  let _skipCreditAnim = false;
-  let isAnimatingCredits = false;
+var UI = (function() {
+  function $(id) { return document.getElementById(id); }
+  var reelEls = [], paylineCanvas = null, paylineCtx = null;
+  var pickTapCb = null;
+  var _skipCreditAnim = false;
+  var isAnimatingCredits = false;
 
-  const PAYLINE_COLORS=['#ff0','#0ff','#f0f','#0f0','#f80','#08f','#f44','#4f4','#44f','#ff8','#8ff','#f8f','#8f8','#88f','#f88','#4ff','#ff4','#f4f','#4f8','#84f'];
+  var PAYLINE_COLORS = ['#ff0','#0ff','#f0f','#0f0','#f80','#08f','#f44','#4f4','#44f','#ff8','#8ff','#f8f','#8f8','#88f','#f88','#4ff','#ff4','#f4f','#4f8','#84f'];
 
   function init() {
-    reelEls = [0,1,2,3,4].map(i => $('reel-'+i));
-    // INSERT CASH TO PLAY ticker — only shown when balance is 0
+    reelEls = [0,1,2,3,4].map(function(i) { return $('reel-'+i); });
     if (typeof GameState !== 'undefined' && GameState.balance <= 0) _startInsertCashTicker();
     paylineCanvas = $('payline-canvas');
     if (paylineCanvas) paylineCtx = paylineCanvas.getContext('2d');
@@ -19,192 +18,341 @@ const UI = (() => {
   }
 
   function resizeCanvas() {
-    const frame = $('reel-frame');
+    var frame = $('reel-frame');
     if (!frame || !paylineCanvas) return;
     paylineCanvas.width  = frame.offsetWidth;
     paylineCanvas.height = frame.offsetHeight;
   }
 
+  function _roundCoinValue(raw) { return Math.round(raw); }
+
+  function _formatCoinAmt(raw) {
+    var v = _roundCoinValue(raw);
+    if (v < 1) v = 1;
+    if (v >= 1000) return '$' + Math.round(v / 1000) + 'K';
+    return '$' + v;
+  }
+
+  function _makeCoinSVG(amt, jpLabel) {
+    var isJp = !!jpLabel;
+    var labelText = isJp ? jpLabel : (amt || '');
+    var fontSize  = isJp ? (labelText.length <= 4 ? 32 : 26)
+                         : (labelText.length <= 4 ? 40 : labelText.length <= 5 ? 34 : 28);
+    var textY     = 104;
+    var gradId    = 'lg_cv_' + Math.floor(Math.random() * 99999);
+    var gradDef   = isJp ? '' :
+      '<linearGradient id="' + gradId + '" x1="0%" y1="0%" x2="0%" y2="100%">' +
+        '<stop offset="0%" stop-color="#ffffff"/>' +
+        '<stop offset="40%" stop-color="#f5d878"/>' +
+        '<stop offset="100%" stop-color="#7a6000"/>' +
+      '</linearGradient>';
+    var filterId = isJp ? ('tg_cv_' + Math.floor(Math.random() * 99999)) : null;
+    var fillVal  = isJp ? 'url(#label_' + jpLabel.toLowerCase() + ')' : '#fff0c0';
+    var underline = '<line x1="62" y1="' + (textY + 9) + '" x2="138" y2="' + (textY + 9) + '" stroke="#f5d878" stroke-width="1.2" opacity="0.6"/>';
+
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%">' +
+      '<defs>' +
+        '<radialGradient id="cvFace" cx="36%" cy="30%" r="68%">' +
+          '<stop offset="0%" stop-color="#fffde0"/>' +
+          '<stop offset="18%" stop-color="#f9ee80"/>' +
+          '<stop offset="45%" stop-color="#d4af37"/>' +
+          '<stop offset="72%" stop-color="#b8930a"/>' +
+          '<stop offset="100%" stop-color="#7a5c00"/>' +
+        '</radialGradient>' +
+        '<radialGradient id="cvRim" cx="50%" cy="50%" r="50%">' +
+          '<stop offset="0%" stop-color="#c8a820"/>' +
+          '<stop offset="100%" stop-color="#5a4000"/>' +
+        '</radialGradient>' +
+        '<linearGradient id="cvBg" x1="0%" y1="0%" x2="100%" y2="100%">' +
+          '<stop offset="0%" stop-color="#1a0d2e"/>' +
+          '<stop offset="100%" stop-color="#0a0818"/>' +
+        '</linearGradient>' +
+        '<linearGradient id="cvFrame" x1="0%" y1="0%" x2="0%" y2="100%">' +
+          '<stop offset="0%" stop-color="#fffde0"/>' +
+          '<stop offset="50%" stop-color="#d4af37"/>' +
+          '<stop offset="100%" stop-color="#7a5c00"/>' +
+        '</linearGradient>' +
+        '<radialGradient id="cvShine" cx="32%" cy="26%" r="48%">' +
+          '<stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>' +
+          '<stop offset="60%" stop-color="#ffffff" stop-opacity="0.08"/>' +
+          '<stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>' +
+        '</radialGradient>' +
+        '<filter id="cvGlow" x="-20%" y="-20%" width="140%" height="140%">' +
+          '<feGaussianBlur stdDeviation="4" result="blur"/>' +
+          '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>' +
+        '</filter>' +
+        (isJp ? ('<filter id="' + filterId + '">' +
+          '<feGaussianBlur stdDeviation="2" result="blur"/>' +
+          '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>' +
+        '</filter>') : '') +
+        gradDef +
+      '</defs>' +
+      '<rect width="200" height="200" rx="18" fill="url(#cvBg)"/>' +
+      '<rect x="3" y="3" width="194" height="194" rx="16" fill="none" stroke="url(#cvFrame)" stroke-width="3"/>' +
+      '<circle cx="100" cy="100" r="82" fill="#d4af37" opacity="0.12" filter="url(#cvGlow)"/>' +
+      '<circle cx="100" cy="100" r="77" fill="url(#cvRim)"/>' +
+      '<g stroke="#f0d060" stroke-width="2" opacity="0.5">' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(0,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(18,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(36,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(54,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(72,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(90,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(108,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(126,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(144,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(162,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(180,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(198,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(216,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(234,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(252,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(270,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(288,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(306,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(324,100,100)"/>' +
+        '<line x1="100" y1="24" x2="100" y2="30" transform="rotate(342,100,100)"/>' +
+      '</g>' +
+      '<circle cx="100" cy="100" r="72" fill="url(#cvFace)"/>' +
+      '<circle cx="100" cy="100" r="66" fill="none" stroke="#9a7800" stroke-width="1.8" opacity="0.7"/>' +
+      '<circle cx="100" cy="100" r="60" fill="none" stroke="#d4af37" stroke-width="0.8" opacity="0.4"/>' +
+      '<circle cx="100" cy="100" r="54" fill="none" stroke="#c8a820" stroke-width="0.6" opacity="0.35"/>' +
+      '<ellipse cx="100" cy="104" rx="38" ry="22" fill="#8a6200" opacity="0.18"/>' +
+      '<ellipse cx="100" cy="103" rx="36" ry="20" fill="#6a4800" opacity="0.12"/>' +
+      '<circle cx="100" cy="100" r="72" fill="url(#cvShine)"/>' +
+      '<text x="100" y="' + textY + '" ' +
+        'font-family="\'Cinzel\',Georgia,serif" ' +
+        'font-size="' + fontSize + '" ' +
+        'font-weight="900" ' +
+        'text-anchor="middle" ' +
+        'letter-spacing="0" ' +
+        'stroke="' + (isJp ? 'rgba(0,0,0,0.92)' : '#1a0800') + '" ' +
+        'stroke-width="' + (isJp ? '6' : '5') + '" ' +
+        'stroke-linejoin="round" ' +
+        'paint-order="stroke fill" ' +
+        'fill="' + fillVal + '"' +
+        (filterId ? ' filter="url(#' + filterId + ')"' : '') + '>' +
+        labelText +
+      '</text>' +
+      underline +
+      '<g opacity="0.75"><circle cx="20" cy="20" r="2.5" fill="#d4af37"/>' +
+        '<line x1="20" y1="14" x2="20" y2="26" stroke="#d4af37" stroke-width="1.2"/>' +
+        '<line x1="14" y1="20" x2="26" y2="20" stroke="#d4af37" stroke-width="1.2"/>' +
+      '</g>' +
+      '<g opacity="0.5"><circle cx="180" cy="20" r="1.8" fill="#d4af37"/>' +
+        '<line x1="180" y1="15" x2="180" y2="25" stroke="#d4af37" stroke-width="1"/>' +
+        '<line x1="175" y1="20" x2="185" y2="20" stroke="#d4af37" stroke-width="1"/>' +
+      '</g>' +
+      '<g opacity="0.5"><circle cx="20" cy="180" r="1.8" fill="#d4af37"/>' +
+        '<line x1="20" y1="175" x2="20" y2="185" stroke="#d4af37" stroke-width="1"/>' +
+        '<line x1="15" y1="180" x2="25" y2="180" stroke="#d4af37" stroke-width="1"/>' +
+      '</g>' +
+      '<g opacity="0.4"><circle cx="180" cy="180" r="1.5" fill="#d4af37"/>' +
+        '<line x1="180" y1="175" x2="180" y2="185" stroke="#d4af37" stroke-width="0.9"/>' +
+        '<line x1="175" y1="180" x2="185" y2="180" stroke="#d4af37" stroke-width="0.9"/>' +
+      '</g>' +
+    '</svg>';
+  }
+
+  function _makeCoinElement(coin) {
+    var jpLabel = (coin && coin.isJackpotOrb && coin.jackpotLevel) ? coin.jackpotLevel : null;
+    var amt = '';
+    if (!jpLabel && coin && coin.value != null) amt = _formatCoinAmt(coin.value);
+    var wrapper = document.createElement('div');
+    wrapper.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
+    wrapper.innerHTML = _makeCoinSVG(amt, jpLabel);
+    return wrapper;
+  }
+
   function makeSymbolImg(symId) {
-    const sym = SYMBOL_BY_ID[symId];
+    var sym = SYMBOL_BY_ID[symId];
     if (!sym) return null;
-    const img = document.createElement('img');
+    var img = document.createElement('img');
     img.src = sym.file; img.alt = sym.name; img.draggable = false;
     return img;
   }
 
   function renderGrid(grid) {
-    reelEls.forEach((reel, col) => {
-      if (!reel) return;
-      let strip = reel.querySelector('.reel-strip');
+    for (var col = 0; col < reelEls.length; col++) {
+      var reel = reelEls[col];
+      if (!reel) continue;
+      var strip = reel.querySelector('.reel-strip');
       if (!strip) {
         strip = document.createElement('div');
         strip.className = 'reel-strip';
         reel.appendChild(strip);
       }
-      // Always reset inline styles that animation may have modified
       strip.innerHTML   = '';
       strip.style.transform  = '';
       strip.style.transition = '';
-      strip.style.height     = '100%'; // ensure flex fill is restored
-      for (let row = 0; row < 3; row++) {
+      strip.style.height     = '100%';
+      for (var row = 0; row < 3; row++) {
         strip.appendChild(_makeCell(grid[col][row], col, row));
       }
-    });
+    }
     resizeCanvas();
   }
 
+  var _pendingCoinMap = null;
+
+  function setPendingCoinMap(coinMap) { _pendingCoinMap = coinMap || null; }
+
+  function overlayReelCoinValues(grid, coinMap) {
+    var prev = _pendingCoinMap;
+    _pendingCoinMap = coinMap;
+    renderGrid(grid);
+    _pendingCoinMap = prev;
+  }
+
+  function clearReelCoinOverlay() {
+    var frame = document.getElementById('reel-frame');
+    if (!frame) return;
+    var layer = frame.querySelector('.reel-coin-overlay-layer');
+    if (layer) layer.parentNode.removeChild(layer);
+    var banner = frame.querySelector('.hs-win-banner');
+    if (banner) banner.parentNode.removeChild(banner);
+  }
+
   function _makeCell(symId, col, row) {
-    const cell = document.createElement('div');
+    var cell = document.createElement('div');
     cell.className = 'symbol-cell';
-    cell.id = `sc-${col}-${row}`;
-    const img = makeSymbolImg(symId);
+    cell.id = 'sc-' + col + '-' + row;
+    if (symId === BONUS_ID && _pendingCoinMap) {
+      var pos  = col * 3 + row;
+      var coin = _pendingCoinMap[pos];
+      if (coin) { cell.appendChild(_makeCoinElement(coin)); return cell; }
+    }
+    var img = makeSymbolImg(symId);
     if (img) cell.appendChild(img);
     return cell;
   }
 
-  // ── REEL SPIN ANIMATION ───────────────────────────────────────────────
-  async function animateReelsStop(stops, grid, isReplay=false, isRedSpin=false) {
+  async function animateReelsStop(stops, grid, isReplay, isRedSpin) {
+    if (isReplay === undefined) isReplay = false;
+    if (isRedSpin === undefined) isRedSpin = false;
     clearPaylines(); clearHighlights();
 
-    const DELAYS = isReplay  ? [190,230,270,320,370]
-                             : [640,790,940,1090,1240]; // Same for base AND red spin
-    const SPIN = isReplay ? 155 : 490;
+    var DELAYS = isReplay ? [190,230,270,320,370] : [640,790,940,1090,1240];
+    var SPIN   = isReplay ? 155 : 490;
 
-    const promises = reelEls.map((reel, col) => new Promise(resolve => {
-      if (!reel) { resolve(); return; }
+    var promises = reelEls.map(function(reel, col) {
+      return new Promise(function(resolve) {
+        if (!reel) { resolve(); return; }
+        setTimeout(function() {
+          var strip = reel.querySelector('.reel-strip');
+          if (!strip) { reel.style.filter = ''; resolve(); return; }
 
-      // No blur — crisp spin
+          var reelStrip = REEL_STRIPS[col];
+          var len       = reelStrip.length;
+          var stop      = stops[col];
+          var reelH     = reel.offsetHeight || 210;
+          var cellH     = Math.floor(reelH / 3);
 
-      setTimeout(() => {
-        const strip = reel.querySelector('.reel-strip');
-        if (!strip) { reel.style.filter = ''; resolve(); return; }
+          strip.style.transition = 'none';
+          strip.style.transform  = 'translateY(0)';
+          strip.style.height     = 'auto';
+          strip.innerHTML        = '';
 
-        const reelStrip = REEL_STRIPS[col];
-        const len = reelStrip.length;
-        const stop = stops[col];
+          for (var i = -15; i < 3; i++) {
+            var symId = reelStrip[((stop + i) % len + len) % len];
+            var cell  = document.createElement('div');
+            cell.className = 'symbol-cell';
+            cell.style.cssText = 'height:' + cellH + 'px;flex:none;min-height:unset;';
+            var img = makeSymbolImg(symId);
+            if (img) cell.appendChild(img);
+            strip.appendChild(cell);
+          }
 
-        // Measure reel — use EXPLICIT pixel heights on animation cells
-        // so 9 cells don't get crushed to 1/9 by the flex layout
-        const reelH = reel.offsetHeight || 210;
-        const cellH = Math.floor(reelH / 3);
+          strip.style.transform = 'translateY(0)';
 
-        strip.style.transition = 'none';
-        strip.style.transform  = 'translateY(0)';
-        strip.style.height     = 'auto'; // let strip grow to 9 x cellH
-        strip.innerHTML        = '';
+          requestAnimationFrame(function() {
+            requestAnimationFrame(function() {
+              strip.style.transition = 'transform ' + SPIN + 'ms cubic-bezier(0.15,0.75,0.35,1)';
+              strip.style.transform  = 'translateY(' + (-15 * cellH) + 'px)';
 
-        // Build 18 symbols: i = -15 to 2
-        // Cells 0-14 scroll past (5 visual rotations); cells 15,16,17 are final winners
-        for (let i = -15; i < 3; i++) {
-          const symId = reelStrip[((stop + i) % len + len) % len];
-          const cell  = document.createElement('div');
-          cell.className = 'symbol-cell';
-          // Explicit pixel height — bypass flex completely during animation
-          cell.style.cssText = `height:${cellH}px;flex:none;min-height:unset;`;
-          const img = makeSymbolImg(symId);
-          if (img) cell.appendChild(img);
-          strip.appendChild(cell);
-        }
-
-        // Start: translateY(0) shows first 3 cells
-        // End:   translateY(-15*cellH) shows last 3 cells (final symbols)
-        // 15 symbols scroll past = ~5 visual rotations before stopping
-        strip.style.transform = 'translateY(0)';
-
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          strip.style.transition = `transform ${SPIN}ms cubic-bezier(0.15,0.75,0.35,1)`;
-          strip.style.transform  = `translateY(${-15 * cellH}px)`;
-
-          setTimeout(() => {
-            // Snap to clean 3-cell flex layout
-            reel.style.transition  = '';
-            strip.style.transition = 'none';
-            strip.style.transform  = '';
-            strip.style.height     = '100%'; // restore flex fill
-            strip.innerHTML        = '';
-
-            for (let row = 0; row < 3; row++) {
-              strip.appendChild(_makeCell(grid[col][row], col, row));
-            }
-
-            // Bounce
-            strip.style.transform = 'translateY(-5px)';
-            setTimeout(() => {
-              strip.style.transition = 'transform 0.11s ease-out';
-              strip.style.transform  = 'translateY(2px)';
-              setTimeout(() => {
-                strip.style.transition = 'transform 0.08s ease-in';
+              setTimeout(function() {
+                reel.style.transition  = '';
+                strip.style.transition = 'none';
                 strip.style.transform  = '';
-                if (!isReplay && !isRedSpin) Audio.play('reel_stop');
-                resolve();
-              }, 75);
-            }, isRedSpin ? 55 : 105);
+                strip.style.height     = '100%';
+                strip.innerHTML        = '';
 
-          }, SPIN + 25);
-        }));
-      }, DELAYS[col]);
-    }));
+                for (var row = 0; row < 3; row++) {
+                  strip.appendChild(_makeCell(grid[col][row], col, row));
+                }
+
+                strip.style.transform = 'translateY(-5px)';
+                setTimeout(function() {
+                  strip.style.transition = 'transform 0.11s ease-out';
+                  strip.style.transform  = 'translateY(2px)';
+                  setTimeout(function() {
+                    strip.style.transition = 'transform 0.08s ease-in';
+                    strip.style.transform  = '';
+                    if (!isReplay && !isRedSpin) Audio.play('reel_stop');
+                    resolve();
+                  }, 75);
+                }, isRedSpin ? 55 : 105);
+
+              }, SPIN + 25);
+            });
+          });
+        }, DELAYS[col]);
+      });
+    });
 
     await Promise.all(promises);
     resizeCanvas();
   }
 
-
-  // ── RED SPIN PAYLINE FLASH — non-blocking brief highlight ────────────
   async function showRedSpinPaylineFlash(paylineWins) {
     if (!paylineWins || paylineWins.length === 0) return;
-    // Draw ALL winning lines simultaneously
     clearPaylines();
-    paylineWins.forEach(function(win) {
-      drawPayline(win.lineIndex, win.line);
-      flashCells(win.line, win.count);
-    });
-    // Hold for 500ms so player can see — this runs BEFORE the win amount display
+    for (var wi = 0; wi < paylineWins.length; wi++) {
+      drawPayline(paylineWins[wi].lineIndex, paylineWins[wi].line, paylineWins[wi].isLetter);
+      flashCells(paylineWins[wi].line, paylineWins[wi].count);
+    }
     await delay(500);
     clearPaylines();
     clearHighlights();
   }
 
-  // ── WIN DISPLAY ───────────────────────────────────────────────────────
-  // fast=true: shorter display time (used during Red Spin)
   function _skipRequested() {
     try { return typeof getSkipPaylineAnimations !== 'undefined' && getSkipPaylineAnimations(); }
     catch(e) { return false; }
   }
 
-  // MLMC multi-line win display
-  // Phase 1: All winning lines simultaneously (~1 second)
-  // Phase 2: Cycle each line individually showing credits won
-  // Skip anytime by pressing Spin
-  async function showBaseWins(result, betPerLine, linesActive, isReplay=false, fast=false) {
+  async function showBaseWins(result, betPerLine, linesActive, isReplay, fast) {
+    if (isReplay === undefined) isReplay = false;
+    if (fast === undefined) fast = false;
     if (!isReplay && _skipRequested()) { clearPaylines(); clearHighlights(); return; }
-    const wins = result.paylineWins || [];
+    var wins = result.paylineWins || [];
     if (!wins.length && !result.scatterWin) return;
 
-    // ── Phase 1: All lines flash at once ──────────────────────────────
     if (!_skipRequested()) {
-      wins.forEach(win => { drawPayline(win.lineIndex, win.line); flashCells(win.line, win.count); });
+      for (var wi = 0; wi < wins.length; wi++) {
+        drawPayline(wins[wi].lineIndex, wins[wi].line, wins[wi].isLetter);
+        flashCells(wins[wi].line, wins[wi].count);
+      }
       if (result.scatterWin) flashScatters();
       updateWinDisplay(result.totalWin);
-      const p1 = fast ? 400 : isReplay ? 500 : 1000;
-      for (let i = 0; i < 5; i++) {
+      var p1 = fast ? 400 : isReplay ? 500 : 1000;
+      for (var i1 = 0; i1 < 5; i1++) {
         if (!isReplay && _skipRequested()) { clearPaylines(); clearHighlights(); return; }
         await delay(Math.ceil(p1 / 5));
       }
       clearPaylines(); clearHighlights();
     }
 
-    // ── Phase 2: Cycle each line lowest→highest (skip in fast/replay mode) ─
     if (!fast) {
-      const sortedWins = wins.slice().sort(function(a,b) { return a.amount - b.amount; });
-      for (const win of sortedWins) {
+      var sortedWins = wins.slice().sort(function(a, b) { return a.amount - b.amount; });
+      for (var si = 0; si < sortedWins.length; si++) {
+        var win = sortedWins[si];
         if (!isReplay && _skipRequested()) { clearPaylines(); clearHighlights(); return; }
-        drawPayline(win.lineIndex, win.line);
+        drawPayline(win.lineIndex, win.line, win.isLetter);
         flashCells(win.line, win.count);
         updateWinDisplay(win.amount);
-        const p2 = isReplay ? 400 : 700;
-        for (let i = 0; i < 4; i++) {
+        var p2 = isReplay ? 400 : 700;
+        for (var i2 = 0; i2 < 4; i2++) {
           if (!isReplay && _skipRequested()) break;
           await delay(Math.ceil(p2 / 4));
         }
@@ -213,7 +361,7 @@ const UI = (() => {
       if (result.scatterWin && !_skipRequested()) {
         flashScatters();
         updateWinDisplay(result.scatterWin);
-        for (let i = 0; i < 4; i++) {
+        for (var i3 = 0; i3 < 4; i3++) {
           if (!isReplay && _skipRequested()) break;
           await delay(isReplay ? 100 : 175);
         }
@@ -223,77 +371,84 @@ const UI = (() => {
     if (!_skipRequested()) updateWinDisplay(result.totalWin);
   }
 
-  function drawPayline(lineIndex, line) {
+  function drawPayline(lineIndex, line, isLetter) {
     if (!paylineCtx || !line) return;
-    const frame = $('reel-frame');
+    var frame = $('reel-frame');
     if (!frame) return;
     resizeCanvas();
-    const cw = frame.offsetWidth / 5;
-    const ch = frame.offsetHeight / 3;
-    // NO clearRect here — canvas accumulates all lines
-    // Use clearPaylines() explicitly to wipe all lines at once
+    var cw = frame.offsetWidth / 5;
+    var ch = frame.offsetHeight / 3;
     paylineCtx.beginPath();
-    paylineCtx.strokeStyle = PAYLINE_COLORS[lineIndex % PAYLINE_COLORS.length];
-    paylineCtx.lineWidth   = 3;
-    paylineCtx.shadowColor = PAYLINE_COLORS[lineIndex % PAYLINE_COLORS.length];
-    paylineCtx.shadowBlur  = 10;
+    var color = isLetter ? '#f5d878' : PAYLINE_COLORS[lineIndex % PAYLINE_COLORS.length];
+    paylineCtx.strokeStyle = color;
+    paylineCtx.lineWidth   = isLetter ? 4 : 3;
+    paylineCtx.shadowColor = color;
+    paylineCtx.shadowBlur  = isLetter ? 14 : 10;
     paylineCtx.lineCap = 'round'; paylineCtx.lineJoin = 'round';
-    line.forEach((row, col) => {
-      const x = col * cw + cw / 2, y = row * ch + ch / 2;
-      col === 0 ? paylineCtx.moveTo(x,y) : paylineCtx.lineTo(x,y);
-    });
+    for (var col = 0; col < line.length; col++) {
+      var x = col * cw + cw / 2;
+      var y = line[col] * ch + ch / 2;
+      if (col === 0) paylineCtx.moveTo(x, y); else paylineCtx.lineTo(x, y);
+    }
     paylineCtx.stroke();
     paylineCtx.shadowBlur = 0;
   }
 
-  // Clear canvas — call this ONCE to wipe all paylines together
-  // Never call clearRect inside drawPayline
-
   function flashCells(line, count) {
-    for (let col = 0; col < count; col++) {
-      const cell = $(`sc-${col}-${line[col]}`);
+    for (var col = 0; col < count; col++) {
+      var cell = $('sc-' + col + '-' + line[col]);
       if (cell) cell.classList.add('win-flash', 'highlight');
     }
   }
 
   function flashScatters() {
-    document.querySelectorAll('.symbol-cell img').forEach(img => {
-      if (img.src.includes('lipstick')) img.parentElement.classList.add('win-flash','highlight');
-    });
+    var imgs = document.querySelectorAll('.symbol-cell img');
+    for (var i = 0; i < imgs.length; i++) {
+      if (imgs[i].src.indexOf('lipstick') >= 0) imgs[i].parentElement.classList.add('win-flash', 'highlight');
+    }
+  }
+
+  var _paylineHighlightTimer = null;
+  function showActivePaylines(linesCount) {
+    if (_paylineHighlightTimer) { clearTimeout(_paylineHighlightTimer); _paylineHighlightTimer = null; }
+    clearPaylines();
+    if (!PAYLINES) return;
+    var count = Math.min(linesCount, PAYLINES.length);
+    for (var i = 0; i < count; i++) drawPayline(i, PAYLINES[i], false);
+    _paylineHighlightTimer = setTimeout(function() { clearPaylines(); _paylineHighlightTimer = null; }, 2500);
   }
 
   function clearPaylines() {
-    if (paylineCtx) paylineCtx.clearRect(0,0,(paylineCanvas?paylineCanvas.width:0),(paylineCanvas?paylineCanvas.height:0));
-  }
-  function clearHighlights(skipLetterFlash) {
-    document.querySelectorAll('.symbol-cell').forEach(function(c) {
-      c.classList.remove('win-flash', 'highlight');
-      // letter-win-flash removes itself via setTimeout — don't clear it here
-    });
+    if (paylineCtx) paylineCtx.clearRect(0, 0, paylineCanvas ? paylineCanvas.width : 0, paylineCanvas ? paylineCanvas.height : 0);
   }
 
-  // ── SKIP CREDIT ANIMATION ─────────────────────────────────────────────
+  function clearHighlights() {
+    var cells = document.querySelectorAll('.symbol-cell');
+    for (var i = 0; i < cells.length; i++) cells[i].classList.remove('win-flash', 'highlight');
+  }
+
   function skipCreditAnimation() {
     _skipCreditAnim = true;
     isAnimatingCredits = false;
-    var _sb1=$('spin-btn'); if(_sb1) _sb1.classList.remove('skip-mode');
+    var sb = $('spin-btn'); if (sb) sb.classList.remove('skip-mode');
   }
 
-  async function animateCreditCountup(amount, isRedSpin=false) {
+  async function animateCreditCountup(amount, isRedSpin) {
+    if (isRedSpin === undefined) isRedSpin = false;
     if (!isRedSpin) {
       isAnimatingCredits = true;
       _skipCreditAnim = false;
-      var _sb2=$('spin-btn'); if(_sb2) _sb2.classList.add('skip-mode');
+      var sb = $('spin-btn'); if (sb) sb.classList.add('skip-mode');
     }
-    const end      = GameState.balance;
-    const start    = end - amount;
-    const duration = Math.min(1600, Math.max(350, amount * 6));
-    const startTime = Date.now();
+    var end      = GameState.balance;
+    var start    = end - amount;
+    var duration = Math.min(1600, Math.max(350, amount * 6));
+    var startTime = Date.now();
 
     while (true) {
       if (!isRedSpin && _skipCreditAnim) { updateBalance(end); break; }
-      const progress = Math.min((Date.now() - startTime) / duration, 1);
-      const eased    = 1 - Math.pow(1 - progress, 3);
+      var progress = Math.min((Date.now() - startTime) / duration, 1);
+      var eased    = 1 - Math.pow(1 - progress, 3);
       updateBalance(start + (end - start) * eased);
       Audio.play('coin_drop');
       if (progress >= 1) break;
@@ -304,61 +459,57 @@ const UI = (() => {
     if (!isRedSpin) {
       isAnimatingCredits = false;
       _skipCreditAnim = false;
-      var _sb1=$('spin-btn'); if(_sb1) _sb1.classList.remove('skip-mode');
+      var sb2 = $('spin-btn'); if (sb2) sb2.classList.remove('skip-mode');
     }
   }
 
-  // ── CREDIT DISPLAYS ───────────────────────────────────────────────────
   function updateBalance(val) {
-    const el = $('balance-val');
-    if (el) el.textContent = '$' + (parseFloat(val)||0).toFixed(2);
-    // Start/stop the insert-cash ticker based on balance
-    if ((parseFloat(val)||0) > 0) _stopInsertCashTicker();
+    var el = $('balance-val');
+    if (el) el.textContent = '$' + (parseFloat(val) || 0).toFixed(2);
+    if ((parseFloat(val) || 0) > 0) _stopInsertCashTicker();
     else _startInsertCashTicker();
   }
 
-  function updateWinDisplay(val, lineLabel=null) {
-    const el = $('win-amount');
+  function updateWinDisplay(val, lineLabel) {
+    if (lineLabel === undefined) lineLabel = null;
+    var el = $('win-amount');
     if (!el) return;
     el.textContent = val > 0 ? '$' + val.toFixed(2) : '$0.00';
-    const lblEl = $('win-line-label');
+    var lblEl = $('win-line-label');
     if (lblEl) lblEl.textContent = lineLabel || '';
     if (val > 0) { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
   }
 
   function updateBetDisplay(val) {
-    const el = $('bet-display');
+    var el = $('bet-display');
     if (el) el.textContent = '$' + val.toFixed(2);
   }
 
   function updateJackpotMeters() {
-    ['MINI','MINOR','MAJOR','GRAND'].forEach(key => {
-      const val = '$' + GameState.jackpots[key].current.toFixed(2);
-      const k   = key.toLowerCase();
-      // Main jackpot bar
-      const el = document.querySelector(`#jp-${k} .jp-amount`);
+    var keys = ['MINI','MINOR','MAJOR','GRAND'];
+    for (var ji = 0; ji < keys.length; ji++) {
+      var key = keys[ji];
+      var val = '$' + GameState.jackpots[key].current.toLocaleString('en', {minimumFractionDigits:2, maximumFractionDigits:2});
+      var k   = key.toLowerCase();
+      var el  = document.querySelector('#jp-' + k + ' .jp-amount');
       if (el) el.textContent = val;
-      // Hold & Spin bonus screen meters
-      const holdEl = $(`hold-jp-${k}`);
+      var holdEl = $('hold-jp-' + k);
       if (holdEl) holdEl.textContent = val;
-      // Pick & Choose bonus screen meters
-      const pickEl = $(`pick-jp-${k}`);
+      var pickEl = $('pick-jp-' + k);
       if (pickEl) pickEl.textContent = val;
-    });
+    }
   }
 
-  // ── RED SPIN — reel-only overlay ─────────────────────────────────────
   async function showRedSpinEntry() {
-    const overlay = $('red-reel-overlay');
-    const frame   = $('reel-frame');
+    var overlay = $('red-reel-overlay');
+    var frame   = $('reel-frame');
     if (overlay) overlay.classList.add('active');
     if (frame)   frame.classList.add('red-active');
-    var _btb=$('bonus-total-box'); if(_btb) _btb.classList.add('visible');
-    if ($('bonus-total-amount')) $('bonus-total-amount').textContent = '$0.00';
+    var btb = $('bonus-total-box'); if (btb) btb.classList.add('visible');
+    var bta = $('bonus-total-amount'); if (bta) bta.textContent = '$0.00';
     setControlsEnabled(false);
-    // Quick flash
     if (overlay) {
-      for (let i = 0; i < 3; i++) {
+      for (var i = 0; i < 3; i++) {
         overlay.style.background = 'rgba(220,0,0,0.72)';
         await delay(100);
         overlay.style.background = '';
@@ -367,322 +518,619 @@ const UI = (() => {
     }
   }
 
-  async function updateRedSpinWin(winAmount, bonusTotal, spinNum, isReplay=false) {
-    // Flash each ascending win amount — player sees the escalation
+  async function updateRedSpinWin(winAmount, bonusTotal, spinNum, isReplay) {
+    if (isReplay === undefined) isReplay = false;
     updateWinDisplay(winAmount);
-    const bt = $('bonus-total-amount');
+    var bt = $('bonus-total-amount');
     if (bt) bt.textContent = '$' + bonusTotal.toFixed(2);
-    var _btb=$('bonus-total-box'); if(_btb) _btb.classList.add('visible');
-    // updateWinDisplay() above already triggers the pop animation — no need to repeat it
+    var btb = $('bonus-total-box'); if (btb) btb.classList.add('visible');
     await delay(isReplay ? 200 : 550);
   }
 
   async function endRedSpinBonus(total) {
-    // Show final total — NO credit countup here (game.js handles balance)
-    // Red screen drops immediately when bonus ends
     updateWinDisplay(total);
     updateBalance(GameState.balance);
-    showToast('🔴 RED SPIN TOTAL: $' + total.toFixed(2), 2000);
-    await delay(600); // Brief moment to see the total
+    showToast('RED SPIN TOTAL: $' + total.toFixed(2), 2000);
+    await delay(600);
     deactivateRedScreen();
-  }
-
-  // ── HOLD & SPIN ───────────────────────────────────────────────────────
-  function _coinIcon(type) {
-    return {cash:'🪙', mini:'🔵', minor:'🟢', major:'🟡', grand:'🔶'}[type] || '🪙';
-  }
-  function _coinColor(type) {
-    return {cash:'var(--gold)', mini:'#a8d8ea', minor:'#c9f0a0', major:'#f5d878', grand:'#ff6b35'}[type] || 'var(--gold)';
   }
 
   function _fillHoldCell(cell, coin) {
     if (!coin) return;
-    // Normalise jackpot coin shape — new coins use {type:'jackpot', jackpotLevel:'MINI'}
-    // Legacy coins used {type:'mini'} etc. Support both so replays/logs stay compatible.
     var displayType = coin.type;
-    if (coin.type === 'jackpot' && coin.jackpotLevel) {
-      displayType = coin.jackpotLevel.toLowerCase(); // 'mini'|'minor'|'major'|'grand'
-    }
+    if (coin.type === 'jackpot' && coin.jackpotLevel) displayType = coin.jackpotLevel.toLowerCase();
     cell.className = 'hold-cell ' + displayType;
+    var _jpSvg = {mini:'jp_mini', minor:'jp_minor', major:'jp_major', grand:'jp_grand'};
     if (displayType === 'cash') {
-      var amt = coin.value >= 1000 ? '$' + (coin.value/1000).toFixed(1) + 'K'
-              : coin.value >= 100  ? '$' + Math.round(coin.value)
-              :                      '$' + coin.value.toFixed(2);
-      cell.innerHTML = '<div class="chip-wrap"><div class="chip-inner"><span class="c-val">' + amt + '</span></div></div>';
+      var cashAmt = _formatCoinAmt(coin.value);
+      cell.innerHTML = '<div class="hs-coin-wrap">' + _makeCoinSVG(cashAmt, null) + '</div>';
     } else {
-      var labels = {mini:'MINI', minor:'MINOR', major:'MAJOR', grand:'GRAND'};
-      var lbl = labels[displayType] || displayType.toUpperCase();
+      var coinSrc = _jpSvg[displayType]
+        ? 'assets/symbols/' + _jpSvg[displayType] + '.svg'
+        : 'assets/symbols/gold_coin.svg';
       var valAmt = coin.value != null ? '$' + Math.round(coin.value) : '';
-      cell.innerHTML = '<div class="chip-wrap"><div class="chip-inner"><span class="c-lbl">' + lbl + '</span><span class="c-val">' + valAmt + '</span></div></div>';
+      cell.innerHTML =
+        '<div class="hs-coin-wrap">' +
+          '<img src="' + coinSrc + '" class="hs-coin-img" draggable="false">' +
+          '<div class="hs-coin-overlay">' +
+            '<span class="hs-c-val hs-c-val-jp">' + valAmt + '</span>' +
+          '</div>' +
+        '</div>';
     }
   }
 
   async function showHoldSpinBoard(board, respins) {
-    const screen = $('hold-screen');
+    var screen = $('hold-screen');
     if (!screen) return;
-    await _holdSpinReelIntro();
+    _lastRespinVal = respins;
+    await triggerHoldSpinExplosion();
     screen.classList.add('active');
-    updateJackpotMeters(); // Show jackpots in Hold & Spin screen
+    updateJackpotMeters();
     _renderHoldBoard(board);
-    updateRespinCounter(respins);
+    updateRespinCounter(respins, true);
     updateHoldTotal(0);
     setControlsEnabled(false);
     await delay(300);
   }
 
-  async function _holdSpinReelIntro() {
-    const stops = REEL_STRIPS.map(s => Math.floor(Math.random() * s.length));
-    const grid  = Array(5).fill(null).map(() => [BONUS_ID, BONUS_ID, BONUS_ID]);
-    await animateReelsStop(stops, grid);
-    await delay(450);
-  }
-
   function _renderHoldBoard(board) {
-    const holdBoard = $('hold-board');
+    var holdBoard = $('hold-board');
     if (!holdBoard) return;
     holdBoard.innerHTML = '';
-    board.forEach((coin, i) => {
-      const cell = document.createElement('div');
+    for (var i = 0; i < board.length; i++) {
+      var cell = document.createElement('div');
       cell.className = 'hold-cell';
       cell.id = 'hcell-' + i;
-      if (coin) _fillHoldCell(cell, coin);
+      if (board[i]) _fillHoldCell(cell, board[i]);
       holdBoard.appendChild(cell);
-    });
+    }
   }
 
-  async function animateHoldSpinning(board, durationMs=480) {
-    // Aristocrat style: rapid spinning coin on ALL empty cells during respin
-    board.forEach(function(coin, i) {
-      if (coin !== null) return; // skip locked coins
+  async function triggerHoldSpinExplosion() {
+    var frame = document.getElementById('reel-frame');
+    if (!frame) return;
+    frame.classList.add('hs-trigger-shake');
+    setTimeout(function() { frame.classList.remove('hs-trigger-shake'); }, 700);
+    var rect   = frame.getBoundingClientRect();
+    var cx     = rect.left + rect.width  / 2;
+    var cy     = rect.top  + rect.height / 2;
+    var colors = ['#f5c518','#ffe060','#fff7a0','#d4af37','#ffcc00'];
+    for (var pi = 0; pi < 40; pi++) {
+      var p      = document.createElement('div');
+      p.className = 'hs-burst-particle';
+      var angle  = Math.random() * Math.PI * 2;
+      var dist   = 60 + Math.random() * 140;
+      var size   = 4 + Math.random() * 8;
+      var dur    = 0.5 + Math.random() * 0.6;
+      var color  = colors[Math.floor(Math.random() * colors.length)];
+      p.style.cssText =
+        'position:fixed;border-radius:50%;pointer-events:none;z-index:999;' +
+        'width:' + size + 'px;height:' + size + 'px;' +
+        'background:' + color + ';' +
+        'box-shadow:0 0 6px ' + color + ';' +
+        'left:' + cx + 'px;top:' + cy + 'px;' +
+        'animation:hsBurstOut ' + dur.toFixed(2) + 's ease-out forwards;' +
+        '--bx:' + (Math.cos(angle) * dist).toFixed(0) + 'px;' +
+        '--by:' + (Math.sin(angle) * dist).toFixed(0) + 'px;';
+      document.body.appendChild(p);
+      (function(el, ms) { setTimeout(function() { if (el.parentNode) el.remove(); }, ms); })(p, dur * 1000 + 100);
+    }
+    var flash = document.createElement('div');
+    flash.className = 'hs-trigger-flash';
+    frame.appendChild(flash);
+    setTimeout(function() { if (flash.parentNode) flash.remove(); }, 600);
+    await delay(350);
+  }
+
+  /* pulseLockedCoins removed v6l52 — per owner: no glow animations in H&S */
+
+  var _HS_REEL_COINS = [
+    null,
+    { src: 'assets/symbols/gold_coin.svg' },
+    null,
+    { src: 'assets/symbols/jp_mini.svg'  },
+    null,
+    { src: 'assets/symbols/gold_coin.svg' },
+    null,
+    { src: 'assets/symbols/jp_minor.svg' },
+    { src: 'assets/symbols/jp_major.svg' },
+    null,
+    { src: 'assets/symbols/jp_grand.svg' },
+    null,
+  ];
+
+  function startHoldSpinning(board, respinDisplay, emptyCount, isLastThree) {
+    var isNearMiss = (respinDisplay === 1);
+    var isAnticip  = (emptyCount != null && emptyCount <= 2);
+    var lastThree  = !!isLastThree;
+
+    for (var i = 0; i < board.length; i++) {
+      if (board[i] !== null) continue;
       var cell = $('hcell-' + i);
-      if (!cell) return;
-      // Show spinning coin on empty cell
-      cell.innerHTML = '<div class="chip-wrap"><div class="chip-inner"></div></div>';
+      if (!cell) continue;
+
+      cell.innerHTML = '';
+      cell.classList.remove('spinning-cell', 'near-miss', 'anticipation', 'last-three');
+
+      var strip = document.createElement('div');
+      strip.className = 'hs-reel-strip';
+
+      var baseDur = 2.4 + Math.random() * 0.8;
+      var nmDur   = 4.5 + Math.random() * 1.5;
+      var antDur  = 1.3 + Math.random() * 0.5;
+      var ltDur   = 3.2 + Math.random() * 1.0;
+      var offset  = -(Math.random() * baseDur);
+      strip.style.setProperty('--reel-dur',     baseDur.toFixed(2) + 's');
+      strip.style.setProperty('--reel-dur-nm',  nmDur.toFixed(2)   + 's');
+      strip.style.setProperty('--reel-dur-ant', antDur.toFixed(2)  + 's');
+      strip.style.setProperty('--reel-dur-lt',  ltDur.toFixed(2)   + 's');
+      strip.style.setProperty('--reel-offset',  offset.toFixed(2)  + 's');
+
+      if (lastThree)       strip.classList.add('last-three');
+      else if (isAnticip)  strip.classList.add('anticipation');
+      else if (isNearMiss) strip.classList.add('near-miss');
+
+      for (var pass = 0; pass < 2; pass++) {
+        for (var ri = 0; ri < _HS_REEL_COINS.length; ri++) {
+          var def  = _HS_REEL_COINS[ri];
+          var disc = document.createElement('div');
+          disc.className = def ? 'hs-reel-coin' : 'hs-reel-blank';
+          if (def) {
+            var img = document.createElement('img');
+            img.src = def.src; img.className = 'hs-reel-coin-img'; img.draggable = false;
+            disc.appendChild(img);
+          }
+          strip.appendChild(disc);
+        }
+      }
+
+      cell.appendChild(strip);
       cell.classList.add('spinning-cell');
-    });
-    await delay(durationMs);
-    // Clear spinning on all empty cells
-    document.querySelectorAll('.hold-cell.spinning-cell').forEach(function(c) {
-      c.classList.remove('spinning-cell');
-      c.innerHTML = '';
-    });
+      if (lastThree)       cell.classList.add('last-three');
+      else if (isAnticip)  cell.classList.add('anticipation');
+      else if (isNearMiss) cell.classList.add('near-miss');
+    }
   }
 
-  async function animateCoinLand(pos, coin, isReplay=false) {
+  function clearHoldSpinning() {
+    var cells = document.querySelectorAll('#hold-board .hold-cell.spinning-cell');
+    for (var i = 0; i < cells.length; i++) {
+      cells[i].classList.remove('spinning-cell', 'near-miss', 'anticipation', 'last-three');
+      cells[i].innerHTML = '';
+    }
+  }
+
+  async function animateHoldSpinning(board, durationMs, respinDisplay, emptyCount, isLastThree) {
+    if (durationMs === undefined) durationMs = 480;
+    startHoldSpinning(board, respinDisplay, emptyCount, isLastThree);
+    await delay(durationMs);
+    clearHoldSpinning();
+  }
+
+  async function animateCoinLand(pos, coin, isReplay, coinNumber, boardRunningTotal) {
+    if (isReplay === undefined) isReplay = false;
+    if (coinNumber === undefined) coinNumber = 0;
     var cell = $('hcell-' + pos);
     if (!cell) return;
-    cell.classList.remove('spinning-cell');
+    cell.classList.remove('spinning-cell', 'near-miss', 'anticipation', 'last-three');
 
     if (isReplay) {
-      // Replay: instant coin placement
       _fillHoldCell(cell, coin);
       updateHoldTotal(_calcBoardTotal());
       return;
     }
 
-    // ── ARISTOCRAT STYLE: Coin drops from above ──────────────────────────
-    // Step 1: Fill cell with coin content, start hidden above
+    var isSixthCoin = (coinNumber === 6);
+    var isHighValue = (!coin.isJackpotOrb && coin.value != null && coin.value >= 5);
+
     _fillHoldCell(cell, coin);
-    var chipWrap = cell.querySelector('.chip-wrap');
-    if (chipWrap) {
-      chipWrap.style.transform = 'translateY(-120px) rotateY(0deg) scale(0.6)';
-      chipWrap.style.opacity = '0';
+    var coinWrap = cell.querySelector('.hs-coin-wrap');
+    if (coinWrap) {
+      coinWrap.style.transform = isSixthCoin ? 'translateY(-220px) rotateY(0deg) scale(0.4)' : 'translateY(-160px) rotateY(0deg) scale(0.5)';
+      coinWrap.style.opacity   = '0';
+      coinWrap.style.animation = 'none';
     }
 
-    // Brief pause before drop (stagger effect if multiple coins land)
     await delay(30);
 
-    // Step 2: Trigger drop animation
-    cell.classList.add('coin-dropping');
-    if (chipWrap) {
-      chipWrap.style.transform = '';
-      chipWrap.style.opacity = '';
+    if (coinWrap) {
+      coinWrap.style.transform = '';
+      coinWrap.style.opacity   = '';
+      coinWrap.style.animation = '';
     }
+    if (isSixthCoin) cell.classList.add('coin-slamming');
+    else             cell.classList.add('coin-dropping');
 
-    // Step 3: Play coin sound on landing (after fall duration ~400ms)
+    var landDelay = isSixthCoin ? 560 : 420;
     setTimeout(function() {
       if (typeof Audio !== 'undefined' && Audio.play) {
-        Audio.play('coin_drop'); // coin clink sound
+        if (isSixthCoin)                             Audio.play('hold_spin_coin_slam');
+        else if (coinNumber >= 1 && coinNumber <= 5) Audio.play('hold_spin_coin_chime');
+        else                                         Audio.play('hold_spin_land');
       }
-      // Landing impact effects
-      cell.classList.remove('coin-dropping');
+
+      cell.classList.remove('coin-dropping', 'coin-slamming');
       cell.classList.add('coin-dropped');
 
-      // Sparkle particles on impact
-      var sparkleCount = 6;
-      var angles = [0, 60, 120, 180, 240, 300];
-      angles.forEach(function(angle) {
+      if (boardRunningTotal !== undefined) updateHoldTotal(boardRunningTotal);
+      else                                updateHoldTotal(_calcBoardTotal());
+
+      if (isSixthCoin) _spawnLightningBurst(cell);
+
+      var angles  = isSixthCoin ? [0,40,80,120,160,200,240,280,320]
+                  : isHighValue ? [0,45,90,135,180,225,270,315]
+                  :               [0,60,120,180,240,300];
+      var baseDist = isSixthCoin ? 28 : isHighValue ? 22 : 18;
+      for (var ai = 0; ai < angles.length; ai++) {
         var spark = document.createElement('div');
         spark.className = 'coin-sparkle';
-        var dist = 18 + Math.random() * 12;
-        var rad = angle * Math.PI / 180;
+        if (isSixthCoin) spark.classList.add('spark-slam');
+        var dist = baseDist + Math.random() * 12;
+        var rad  = angles[ai] * Math.PI / 180;
         spark.style.setProperty('--sx', (Math.cos(rad) * dist) + 'px');
         spark.style.setProperty('--sy', (Math.sin(rad) * dist) + 'px');
         spark.style.left = '50%'; spark.style.top = '50%';
         spark.style.marginLeft = '-3px'; spark.style.marginTop = '-3px';
         cell.appendChild(spark);
-        setTimeout(function() { spark.remove(); }, 400);
-      });
+        (function(el, ms) { setTimeout(function() { if (el.parentNode) el.remove(); }, ms); })(spark, isSixthCoin ? 650 : 400);
+      }
 
-      // Remove impact class after glow fades
       setTimeout(function() {
         cell.classList.remove('coin-dropped');
-      }, 400);
+        var cw = cell.querySelector('.hs-coin-wrap');
+        if (cw) cw.classList.add('idle-spin');
+      }, 420);
 
-    }, 420); // matches coinFall animation peak
+    }, landDelay);
 
-    // Wait for full animation + bounce settle
-    await delay(700);
-    updateHoldTotal(_calcBoardTotal());
+    await delay(isSixthCoin ? 1200 : 950);
+  }
+
+  function _spawnLightningBurst(cell) {
+    var angles = [0,45,90,135,180,225,270,315];
+    for (var i = 0; i < angles.length; i++) {
+      var bolt = document.createElement('div');
+      bolt.className = 'hs-lightning-bolt';
+      bolt.style.setProperty('--angle', angles[i] + 'deg');
+      cell.appendChild(bolt);
+      (function(el) { setTimeout(function() { if (el.parentNode) el.remove(); }, 550); })(bolt);
+    }
+  }
+
+  function _spawnCounterSparks(badge) {
+    if (!badge) return;
+    var rect = badge.getBoundingClientRect();
+    var cx = rect.left + rect.width  / 2;
+    var cy = rect.top  + rect.height / 2;
+    for (var i = 0; i < 6; i++) {
+      var spark = document.createElement('div');
+      spark.className = 'counter-spark';
+      var rad  = (i * 60) * Math.PI / 180;
+      var dist = 28 + Math.random() * 10;
+      spark.style.left = (cx + Math.cos(rad) * dist) + 'px';
+      spark.style.top  = (cy + Math.sin(rad) * dist) + 'px';
+      document.body.appendChild(spark);
+      (function(el) { setTimeout(function() { if (el.parentNode) el.remove(); }, 420); })(spark);
+    }
   }
 
   function _calcBoardTotal() {
-    let total = 0;
-    document.querySelectorAll('#hold-board .hold-cell').forEach(cell => {
-      var _cv = cell.querySelector('.c-val'); var v = parseFloat(_cv ? (_cv.textContent||'').replace('$','') : '0');
+    var total = 0;
+    var cells = document.querySelectorAll('#hold-board .hold-cell');
+    for (var i = 0; i < cells.length; i++) {
+      var cv = cells[i].querySelector('.hs-c-val');
+      var v  = parseFloat(cv ? (cv.textContent || '').replace('$', '') : '0');
       if (!isNaN(v)) total += v;
-    });
+    }
     return total;
   }
 
   function updateHoldTotal(val) {
-    const el = $('hold-total-val');
-    if (el) el.textContent = '$' + val.toFixed(2);
-  }
-
-  async function updateRespinCounter(val) {
-    const el = $('respin-counter');
+    var el = $('hold-total-val');
     if (el) {
-      el.textContent = val + (val === 1 ? ' SPIN REMAINING' : ' SPINS REMAINING');
-      el.style.color = val <= 1 ? '#ff4040' : val === 2 ? '#ff9900' : '#ffffff';
-      el.style.borderColor = val <= 1 ? '#ff4040' : val === 2 ? '#ff9900' : '#c8860a';
+      el.textContent = '$' + Math.round(val);
+      el.classList.remove('val-pop');
+      void el.offsetWidth;
+      el.classList.add('val-pop');
     }
   }
 
-  async function showBlackoutCelebration(amount, wasDouble=false) {
-    showToast(wasDouble ? '🏆 DOUBLE GRAND! FULL BOARD!' : '🏆 BLACKOUT! GRAND JACKPOT!', 3000);
-    const board = $('hold-board');
+  var _lastRespinVal = 3;
+  async function updateRespinCounter(val, skipResetAnim) {
+    var el = $('respin-counter');
+    if (!el) return;
+    var isReset = (!skipResetAnim && val === 3 && _lastRespinVal < 3);
+    _lastRespinVal = val;
+
+    var badge = $('respin-badge');
+    var label = el.querySelector ? el.querySelector('.respin-label') : null;
+
+    if (badge) {
+      badge.textContent = val;
+      if (isReset) {
+        badge.classList.remove('lightning-reset');
+        void badge.offsetWidth;
+        badge.classList.add('lightning-reset');
+        _spawnCounterSparks(badge);
+      }
+    }
+
+    var labelText = val === 0 ? 'COLLECTING!' : val === 1 ? 'respin remaining' : 'respins remaining';
+    if (label) label.textContent = labelText;
+    else       el.textContent    = labelText;
+
+    var col = val <= 1 ? '#ff4040' : val === 2 ? '#ff9900' : '#ffffff';
+    el.style.color       = col;
+    el.style.borderColor = val <= 1 ? '#ff4040' : val === 2 ? '#ff9900' : '#c8860a';
+    if (badge) badge.style.color = col;
+  }
+
+  async function flashJackpotCoin(pos, level) {
+    var lvl   = level.toLowerCase();
+    var meter = document.querySelector('#hold-jp-bar .bonus-jp-meter.' + lvl) ||
+                document.querySelector('.bonus-jp-meter.' + lvl);
+    if (meter) {
+      meter.classList.add('jp-meter-hit');
+      setTimeout(function() { meter.classList.remove('jp-meter-hit'); }, 1200);
+    }
+    var cell = $('hcell-' + pos);
+    if (cell) {
+      cell.classList.add('jp-cell-flash');
+      setTimeout(function() { cell.classList.remove('jp-cell-flash'); }, 800);
+    }
+    await delay(600);
+  }
+
+  async function _hsCollectCoins(board, runningTotal) {
+    var total = runningTotal || 0;
+    for (var i = 0; i < 15; i++) {
+      var coin = board[i];
+      if (!coin) continue;
+      var cell    = $('hcell-' + i);
+      if (!cell) continue;
+      var totalEl = $('hold-total-val');
+      if (totalEl && cell) {
+        var cRect = cell.getBoundingClientRect();
+        var tRect = totalEl.getBoundingClientRect();
+        var trail = document.createElement('div');
+        trail.className = 'hs-collect-trail';
+        var cx = cRect.left + cRect.width  / 2;
+        var cy = cRect.top  + cRect.height / 2;
+        var tx = tRect.left + tRect.width  / 2;
+        var ty = tRect.top  + tRect.height / 2;
+        trail.style.cssText = 'left:' + cx + 'px;top:' + cy + 'px;--tx:' + (tx - cx) + 'px;--ty:' + (ty - cy) + 'px;';
+        document.body.appendChild(trail);
+        (function(el) { setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 700); })(trail);
+      }
+      cell.classList.add('coin-collected');
+      var coinVal = (coin.value != null) ? coin.value : 0;
+      total += coinVal;
+      updateHoldTotal(total);
+      await delay(320);
+    }
+    return total;
+  }
+
+  var _dismissHoldBonusWin = null;
+
+  async function showHoldBonusWinScreen(totalWon) {
+    var overlay = $('hs-bonus-win-overlay');
+    if (!overlay) return;
+    var amtEl = overlay.querySelector ? overlay.querySelector('#hs-bonus-win-amt') : null;
+    if (amtEl) amtEl.textContent = '$' + totalWon.toFixed(2);
+    var rain = $('hs-coin-rain');
+    if (rain) {
+      rain.innerHTML = '';
+      for (var ci = 0; ci < 40; ci++) {
+        var coinEl = document.createElement('div');
+        coinEl.className = 'hs-rain-coin';
+        coinEl.style.cssText =
+          'left:' + (Math.random() * 100) + '%;' +
+          'animation-delay:' + (Math.random() * 2.5) + 's;' +
+          'animation-duration:' + (1.4 + Math.random() * 1.4) + 's;';
+        rain.appendChild(coinEl);
+      }
+    }
+    overlay.classList.add('active');
+    await delay(200);
+    await new Promise(function(resolve) {
+      var done = false;
+      function dismiss() { if (!done) { done = true; clearTimeout(timer); resolve(); } }
+      var timer = setTimeout(dismiss, 4000);
+      _dismissHoldBonusWin = dismiss;
+      overlay.addEventListener('click', function handler() {
+        dismiss();
+        overlay.removeEventListener('click', handler);
+      }, { once: true });
+    });
+    _dismissHoldBonusWin = null;
+    overlay.classList.remove('active');
+    if (rain) rain.innerHTML = '';
+  }
+
+  async function showRedSpinEndCelebration(bonusTotal, spinNum) {
+    var overlay = document.getElementById('rs-bonus-win-overlay');
+    if (!overlay) return;
+    var amtEl = document.getElementById('rs-bonus-win-amt');
+    if (amtEl) amtEl.textContent = '$' + bonusTotal.toFixed(2);
+    var spinsEl = document.getElementById('rs-bonus-win-spins');
+    if (spinsEl) spinsEl.textContent = spinNum + (spinNum === 1 ? ' SPIN' : ' SPINS');
+    var rain = document.getElementById('rs-coin-rain');
+    if (rain) {
+      rain.innerHTML = '';
+      for (var ci = 0; ci < 35; ci++) {
+        var coinEl = document.createElement('div');
+        coinEl.className = 'rs-rain-coin';
+        coinEl.style.cssText =
+          'left:' + (Math.random() * 100) + '%;' +
+          'animation-delay:' + (Math.random() * 2.5) + 's;' +
+          'animation-duration:' + (1.4 + Math.random() * 1.4) + 's;';
+        rain.appendChild(coinEl);
+      }
+    }
+    overlay.classList.add('active');
+    await delay(200);
+    await new Promise(function(resolve) {
+      var done = false;
+      var timer = setTimeout(function() { if (!done) { done = true; resolve(); } }, 4000);
+      overlay.addEventListener('click', function handler() {
+        if (!done) { done = true; clearTimeout(timer); resolve(); }
+        overlay.removeEventListener('click', handler);
+      }, { once: true });
+    });
+    overlay.classList.remove('active');
+    if (rain) rain.innerHTML = '';
+  }
+
+  async function showBlackoutCelebration(amount, wasDouble) {
+    if (wasDouble === undefined) wasDouble = false;
+    var board = $('hold-board');
     if (board) {
-      for (let i=0; i<8; i++) {
-        board.style.filter = i%2===0 ? 'brightness(2.5) saturate(1.5)' : 'brightness(1)';
+      for (var i = 0; i < 8; i++) {
+        board.style.filter = i % 2 === 0 ? 'brightness(2.5) saturate(1.5)' : 'brightness(1)';
         await delay(180);
       }
       board.style.filter = '';
     }
+    showToast(wasDouble ? 'DOUBLE GRAND! FULL BOARD!' : 'BLACKOUT! GRAND JACKPOT!', 3000);
   }
 
-  async function endHoldSpin(board, totalWon, isBlackout) {
+  async function endHoldSpin(board, totalWon, isBlackout, restoreStops, restoreGrid) {
     _renderHoldBoard(board);
-    updateHoldTotal(totalWon);
-    await delay(900);
-    showToast('💰 HOLD & SPIN TOTAL: $' + totalWon.toFixed(2), 2500);
-    await delay(2000);
-    var _hs=$('hold-screen'); if(_hs) _hs.classList.remove('active');
+    updateHoldTotal(0);
+    await delay(600);
+    await _hsCollectCoins(board, 0);
+    await delay(300);
+    await showHoldBonusWinScreen(totalWon);
+    var hs = $('hold-screen');
+    if (hs) hs.classList.remove('active');
+    if (restoreStops && restoreGrid) {
+      await animateReelsStop(restoreStops, restoreGrid, false, false);
+      var coinMap = {};
+      for (var pos = 0; pos < 15; pos++) { if (board[pos]) coinMap[pos] = board[pos]; }
+      overlayReelCoinValues(restoreGrid, coinMap);
+      _showHoldWinBanner(totalWon);
+    }
     updateWinDisplay(totalWon);
     await animateCreditCountup(totalWon, false);
     setControlsEnabled(true);
   }
 
-  // ── PICK & CHOOSE ─────────────────────────────────────────────────────
+  function _showHoldWinBanner(totalWon) {
+    var frame = document.getElementById('reel-frame');
+    if (!frame) return;
+    var existing = frame.querySelector('.hs-win-banner');
+    if (existing) existing.parentNode.removeChild(existing);
+    var banner = document.createElement('div');
+    banner.className = 'hs-win-banner';
+    banner.innerHTML = '<span class="hs-win-banner-label">BONUS WIN</span><span class="hs-win-banner-amt">$' + totalWon.toFixed(2) + '</span>';
+    frame.appendChild(banner);
+    setTimeout(function() { if (banner.parentNode) banner.parentNode.removeChild(banner); }, 6000);
+  }
+
   function setPickTapCallback(cb) { pickTapCb = cb; }
 
-  async function showPickChooseGrid(size, extraPicks=0) {
-    const screen = $('pick-screen');
+  async function showPickChooseGrid(size, extraPicks) {
+    if (extraPicks === undefined) extraPicks = 0;
+    var screen = $('pick-screen');
     if (!screen) return;
     screen.classList.add('active');
-    updateJackpotMeters(); // Show jackpots in Pick & Choose screen
-    const grid = $('pick-grid');
+    updateJackpotMeters();
+    var grid = $('pick-grid');
     if (!grid) return;
     grid.innerHTML = '';
-    const matchDiv = $('pick-matches');
-    if (matchDiv) matchDiv.textContent = extraPicks > 0 ? `Match 3 symbols to win! (+${extraPicks} extra pick${extraPicks>1?'s':''})` : 'Match 3 symbols to win!';
+    var matchDiv = $('pick-matches');
+    if (matchDiv) matchDiv.textContent = 'Match 3 symbols to win!';
 
-    for (let i = 0; i < size; i++) {
-      const tile = document.createElement('div');
+    for (var i = 0; i < size; i++) {
+      var tile = document.createElement('div');
       tile.className = 'pick-tile';
       tile.dataset.index = i;
-      tile.innerHTML = `<div class="tile-back">⭐</div><div class="tile-front"></div>`;
-      tile.addEventListener('click', () => {
-        if (pickTapCb && !tile.classList.contains('revealed')) pickTapCb(parseInt(tile.dataset.index));
-      });
+      tile.style.pointerEvents = '';
+      tile.style.cursor = '';
+      tile.innerHTML = '<div class="tile-back">&#11088;</div><div class="tile-front"></div>';
+      (function(t) {
+        t.addEventListener('click', function() {
+          if (pickTapCb && !t.classList.contains('revealed')) pickTapCb(parseInt(t.dataset.index));
+        });
+      })(tile);
       grid.appendChild(tile);
     }
     setControlsEnabled(false);
     await delay(300);
   }
 
-  // Reveal tile — showValue=false hides the amount until match is confirmed
-  async function revealPickTile(index, prize, isReplay=false, showValue=true) {
-    const tile = document.querySelector(`.pick-tile[data-index="${index}"]`);
+  async function revealPickTile(index, prize, isReplay, showValue) {
+    if (isReplay === undefined) isReplay = false;
+    if (showValue === undefined) showValue = true;
+    var tile = document.querySelector('.pick-tile[data-index="' + index + '"]');
     if (!tile) return;
     tile.classList.add('revealed');
-    const front = tile.querySelector('.tile-front');
+    var front = tile.querySelector('.tile-front');
     if (front) {
-      const icons = {cash:'💰', red_spin:'🔴', hold_spin:'🪙', mini:'🔵', minor:'🟢', major:'🟡', grand:'🔶'};
-      const icon  = icons[prize.type] || '❓';
-      // Show symbol type but mask value until match
-      const label = showValue && prize.type === 'cash' ? '$'+prize.value.toFixed(2) :
-                    prize.type === 'cash'      ? '?' :
-                    prize.type === 'red_spin'  ? 'RED SPIN' :
-                    prize.type === 'hold_spin' ? 'HOLD SPIN' :
-                    prize.type.toUpperCase() + ' JP';
-      front.innerHTML = `<div style="font-size:17px">${icon}</div><div style="color:var(--gold-light);font-size:8px;margin-top:1px">${label}</div>`;
+      var icons  = {cash:'$', red_spin:'RS', hold_spin:'HS', mini:'MINI', minor:'MINOR', major:'MAJOR', grand:'GRAND'};
+      var icon   = icons[prize.type] || '?';
+      var label  = showValue && prize.type === 'cash' ? '$' + prize.value.toFixed(2) :
+                   prize.type === 'cash'      ? '?' :
+                   prize.type === 'red_spin'  ? 'RED SPIN' :
+                   prize.type === 'hold_spin' ? 'HOLD SPIN' :
+                   prize.type.toUpperCase() + ' JP';
+      front.innerHTML = '<div style="font-size:17px">' + icon + '</div><div style="color:var(--gold-light);font-size:8px;margin-top:1px">' + label + '</div>';
+      front.dataset.prizeType = prize.type;
     }
     await delay(isReplay ? 180 : 260);
   }
 
-  // Update the match progress display
+  function _lockAllPickTiles() {
+    var tiles = document.querySelectorAll('.pick-tile');
+    for (var i = 0; i < tiles.length; i++) {
+      tiles[i].style.pointerEvents = 'none';
+      tiles[i].style.cursor = 'default';
+    }
+  }
+
   function updatePickMatches(matchCounts) {
-    const el = $('pick-matches');
+    var el = $('pick-matches');
     if (!el) return;
-    const icons = {cash:'💰', red_spin:'🔴', hold_spin:'🪙', mini:'🔵', minor:'🟢', major:'🟡', grand:'🔶'};
-    const parts = Object.entries(matchCounts)
-      .filter(([,c]) => c > 0)
-      .map(([type, count]) => `${icons[type]||'?'} × ${count}`);
+    var icons = {cash:'$', red_spin:'RS', hold_spin:'HS', mini:'MINI', minor:'MINOR', major:'MAJOR', grand:'GRAND'};
+    var parts = [];
+    var keys  = Object.keys(matchCounts);
+    for (var ki = 0; ki < keys.length; ki++) {
+      var type  = keys[ki];
+      var count = matchCounts[type];
+      if (count > 0) parts.push((icons[type] || type.toUpperCase()) + ' x' + count);
+    }
     el.textContent = parts.length > 0 ? parts.join('  |  ') : 'Match 3 symbols to win!';
   }
 
-  // Called when player gets 3-of-a-kind match
   async function showPickChooseWin(matchedIndex, prize, totalWon, awardHoldSpin, awardRedSpin, matchCounts) {
-    // Highlight all 3 matching tiles
-    const type = prize.type;
-    const icons = {cash:'💰', red_spin:'🔴', hold_spin:'🪙', mini:'🔵', minor:'🟢', major:'🟡', grand:'🔶'};
-    let matchFound = 0;
-    document.querySelectorAll('.pick-tile.revealed').forEach(tile => {
-      const front = tile.querySelector('.tile-front');
-      if (!front) return;
-      // Check if this tile matches the winning type
-      var _tq=front.querySelector('div'); var tileIcon = _tq ? _tq.textContent : '';
-      if (tileIcon === icons[type] && matchFound < 3) {
-        tile.classList.add('match');
-        // Reveal value on matched tiles
-        if (type === 'cash' && prize.value > 0) {
-          const valDiv = front.querySelectorAll('div')[1];
-          if (valDiv) valDiv.textContent = '$' + totalWon.toFixed(2);
+    _lockAllPickTiles();
+    var type      = prize.type;
+    var matchFound = 0;
+    var revealed  = document.querySelectorAll('.pick-tile.revealed');
+    for (var i = 0; i < revealed.length; i++) {
+      var front = revealed[i].querySelector('.tile-front');
+      if (!front) continue;
+      if (front.dataset.prizeType === type && matchFound < 3) {
+        revealed[i].classList.add('match');
+        if (type === 'cash' && totalWon > 0) {
+          var valDiv = front.querySelectorAll('div')[1];
+          if (valDiv) valDiv.textContent = '$' + Math.round(totalWon);
         }
         matchFound++;
       }
-    });
-
-    // Big announcement
-    const winText = type === 'cash'      ? `💰 MATCH! WON $${totalWon.toFixed(2)}` :
-                    type === 'red_spin'  ? '🔴 MATCH! RED SPIN BONUS!' :
-                    type === 'hold_spin' ? '🪙 MATCH! HOLD & SPIN BONUS!' :
-                    `🏆 MATCH! ${type.toUpperCase()} JACKPOT!`;
+    }
+    var winText = type === 'cash'      ? 'MATCH! WON $' + Math.round(totalWon) :
+                  type === 'red_spin'  ? 'MATCH! RED SPIN BONUS!' :
+                  type === 'hold_spin' ? 'MATCH! HOLD & SPIN BONUS!' :
+                  'MATCH! ' + type.toUpperCase() + ' JACKPOT!';
     showToast(winText, 3000);
     await delay(2000);
   }
 
-  async function revealAllPickTiles(tiles, revealed) {
-    // Only reveal if needed (Pick & Choose stops on match — usually no extra reveals)
-    for (let i = 0; i < tiles.length; i++) {
-      if (!revealed[i]) { await revealPickTile(i, tiles[i], false, true); await delay(60); }
-    }
-  }
-
   async function endPickChoose(prize, totalWon, awardHoldSpin, awardRedSpin) {
     await delay(1500);
-    var _ps=$('pick-screen'); if(_ps) _ps.classList.remove('active');
+    var ps = $('pick-screen'); if (ps) ps.classList.remove('active');
     if (totalWon > 0) {
       updateWinDisplay(totalWon);
       await animateCreditCountup(totalWon, false);
@@ -690,137 +1138,136 @@ const UI = (() => {
     setControlsEnabled(true);
   }
 
-  // ── JACKPOT ───────────────────────────────────────────────────────────
+  // ── JACKPOT CELEBRATION — v6l97 redesign ────────────────────────────
+  // Flash the relevant jackpot meter panel + ring bell simultaneously.
+  // MAJOR/GRAND: also show Cash Out / Continue screen after the flash.
+  // MINI/MINOR: meter flash + bell only, auto-dismiss after 3s.
   async function showJackpotCelebration(type, amount, context) {
-    const overlay = $('jackpot-overlay');
-    if (!overlay) return;
-    const colors = {MINI:'#a8d8ea', MINOR:'#c9f0a0', MAJOR:'#f5d878', GRAND:'#ff6b35'};
-    const isMajorPlus = (type === 'MAJOR' || type === 'GRAND');
-    const typeEl = $('jackpot-type-text'), amtEl = $('jackpot-amount-text'), ctxEl = $('jackpot-context-text');
-    const sistersImg = $('jackpot-sisters-img');
-    const actionsEl  = $('jackpot-actions');
-    const tapEl      = $('jackpot-tap-hint');
+    var colors = { MINI:'#a8d8ea', MINOR:'#c9f0a0', MAJOR:'#f5d878', GRAND:'#ff6b35' };
+    var isMajorPlus = (type === 'MAJOR' || type === 'GRAND');
+    var color = colors[type] || '#f5c518';
 
-    if (typeEl) { typeEl.textContent = type + ' JACKPOT!'; typeEl.style.color = colors[type] || '#fff'; }
-    if (amtEl)  amtEl.textContent = '$' + amount.toFixed(2);
-    if (ctxEl)  ctxEl.textContent = '';
-    // Randomly alternate between sisters together and solo — not both at once
-    if (sistersImg) {
-      var celebImgs = ['assets/sisters_celebrate.png', 'assets/sasha_solo_celebrate.png'];
-      sistersImg.src = celebImgs[Math.floor(Math.random() * celebImgs.length)];
-      sistersImg.style.display = 'block';
+    // 1. Flash the jackpot meter panel for this tier
+    var meterId = 'jp-' + type.toLowerCase();
+    var meter   = $(meterId);
+    if (meter) {
+      meter.classList.add('jp-meter-hit');
+      // Red flash: alternate border/background colour 4 times
+      var flashCount = 0;
+      var flashInterval = setInterval(function() {
+        flashCount++;
+        meter.style.background = (flashCount % 2 === 1) ? 'rgba(255,0,0,0.65)' : '';
+        meter.style.boxShadow  = (flashCount % 2 === 1) ? '0 0 22px rgba(255,0,0,0.9)' : '';
+        if (flashCount >= 8) {
+          clearInterval(flashInterval);
+          meter.style.background = '';
+          meter.style.boxShadow  = '';
+          meter.classList.remove('jp-meter-hit');
+        }
+      }, 160);
     }
 
-    // MAJOR and GRAND: lock screen with Cash Out / Continue
-    if (isMajorPlus) {
+    // Also flash the H&S / P&C bonus JP meters if visible
+    var bonusMeterId = 'hold-jp-' + type.toLowerCase();
+    var bonusMeter   = $(bonusMeterId);
+    if (bonusMeter) { bonusMeter.classList.add('jp-meter-hit'); setTimeout(function() { bonusMeter.classList.remove('jp-meter-hit'); }, 1400); }
+
+    // 2. Ring the bell — simultaneous with flash
+    if (typeof Audio !== 'undefined') {
+      Audio.startJackpotBells();
+      Audio.play('jackpot_' + type.toLowerCase());
+    }
+
+    // 3. MINI/MINOR: auto-dismiss after 3s
+    if (!isMajorPlus) {
+      await delay(3000);
+      if (typeof Audio !== 'undefined') Audio.stopJackpotBells();
+      return { action: 'dismiss' };
+    }
+
+    // 4. MAJOR/GRAND: show Cash Out / Continue overlay after flash settles
+    await delay(640); // let flash run first
+    var overlay    = $('jackpot-overlay');
+    var sistersImg = $('jackpot-sisters-img');
+    var typeEl     = $('jackpot-type-text');
+    var amtEl      = $('jackpot-amount-text');
+    var actionsEl  = $('jackpot-actions');
+    var tapEl      = $('jackpot-tap-hint');
+
+    if (overlay) {
+      if (typeEl) { typeEl.textContent = type + ' JACKPOT!'; typeEl.style.color = color; }
+      if (amtEl)  amtEl.textContent = '$' + amount.toFixed(2);
+      if (sistersImg) {
+        sistersImg.src = 'assets/sisters_celebrate.png';
+        sistersImg.style.display = 'block';
+      }
       if (actionsEl) actionsEl.style.display = 'flex';
       if (tapEl)     tapEl.style.display = 'none';
-    } else {
-      if (actionsEl) actionsEl.style.display = 'none';
-      if (tapEl)     tapEl.style.display = 'block';
+      overlay.classList.add('active');
     }
 
-    overlay.classList.add('active');
-    Audio.startJackpotBells();
-
     return new Promise(function(resolve) {
-      if (isMajorPlus) {
-        var cashBtn = $('jackpot-cashout-btn');
-        var contBtn = $('jackpot-continue-btn');
-        function onCash() {
-          cleanup();
-          // Generate voucher for jackpot amount
-          if (typeof CashOut !== 'undefined' && CashOut.doCashOutAmount) {
-            CashOut.doCashOutAmount(amount, type + '_JACKPOT');
-          }
-          resolve({action:'cashout'});
-        }
-        function onCont() { cleanup(); resolve({action:'continue'}); }
-        function cleanup() {
-          if (cashBtn) cashBtn.removeEventListener('click', onCash);
-          if (contBtn) contBtn.removeEventListener('click', onCont);
-          Audio.stopJackpotBells();
-          overlay.classList.remove('active');
-          if (sistersImg) sistersImg.style.display = 'none';
-        }
-        if (cashBtn) cashBtn.addEventListener('click', onCash, {once:true});
-        if (contBtn) contBtn.addEventListener('click', onCont, {once:true});
-      } else {
-        // MINI / MINOR — tap anywhere to dismiss
-        overlay.addEventListener('click', function dismiss() {
-          Audio.stopJackpotBells();
-          overlay.classList.remove('active');
-          if (sistersImg) sistersImg.style.display = 'none';
-          resolve({action:'dismiss'});
-        }, {once:true});
-        setTimeout(function() {
-          Audio.stopJackpotBells();
-          overlay.classList.remove('active');
-          if (sistersImg) sistersImg.style.display = 'none';
-          resolve({action:'timeout'});
-        }, 8000);
+      var cashBtn = $('jackpot-cashout-btn');
+      var contBtn = $('jackpot-continue-btn');
+      function cleanup() {
+        if (cashBtn) cashBtn.removeEventListener('click', onCash);
+        if (contBtn) contBtn.removeEventListener('click', onCont);
+        if (typeof Audio !== 'undefined') Audio.stopJackpotBells();
+        if (overlay) overlay.classList.remove('active');
+        if (sistersImg) sistersImg.style.display = 'none';
       }
+      function onCash() {
+        cleanup();
+        if (typeof CashOut !== 'undefined' && CashOut.doCashOutAmount) CashOut.doCashOutAmount(amount, type + '_JACKPOT');
+        resolve({ action: 'cashout' });
+      }
+      function onCont() { cleanup(); resolve({ action: 'continue' }); }
+      if (cashBtn) cashBtn.addEventListener('click', onCash, { once: true });
+      if (contBtn) contBtn.addEventListener('click', onCont, { once: true });
     });
   }
 
-  // ── BONUS FEATURE ORB SCREEN ─────────────────────────────────────────
   var _orbTapCallback = null;
-
   function setOrbTapCallback(cb) { _orbTapCallback = cb; }
 
   async function showBonusLetterCelebration() {
-    // Animate B-O-N-U-S spelling on screen before orb selection
     var cel = $('bonus-letter-celebrate');
     if (!cel) return;
     var spans = cel.querySelectorAll('.bonus-cel-letter');
     cel.style.display = 'flex';
-    // Animate each letter in sequence
     for (var li = 0; li < spans.length; li++) {
       spans[li].classList.add('letter-pop');
       Audio.play('reel_stop');
       await delay(220);
     }
-    // Hold full word then pulse
     await delay(600);
     cel.classList.add('bonus-cel-pulse');
     await delay(900);
     cel.style.display = 'none';
     cel.classList.remove('bonus-cel-pulse');
-    for (var lj = 0; lj < spans.length; lj++) {
-      spans[lj].classList.remove('letter-pop');
-    }
+    for (var lj = 0; lj < spans.length; lj++) spans[lj].classList.remove('letter-pop');
   }
 
   async function showBonusOrbScreen(prizes, winPosition) {
-    var screen = $('bonus-orb-screen');
+    var screen    = $('bonus-orb-screen');
     if (!screen) return;
     var container = $('bonus-orb-container');
     if (!container) return;
-
     container.innerHTML = '';
+    var orbLabels = { red_spin:'RED SPIN', pick_choose:'PICK & CHOOSE', hold_spin:'HOLD & SPIN' };
 
     for (var i = 0; i < prizes.length; i++) {
       var orb = document.createElement('div');
       orb.className = 'bonus-orb';
       orb.id = 'orb-' + i;
-      var orbIcons  = { red_spin:'🔴', pick_choose:'⭐', hold_spin:'🪙' };
-      var orbLabels = { red_spin:'RED SPIN', pick_choose:'PICK & CHOOSE', hold_spin:'HOLD & SPIN' };
-      var thisPrize = prizes[i];
-      orb.innerHTML = '<div class="orb-glow"></div><div class="orb-inner"><div class="orb-icon">' + (orbIcons[thisPrize] || '?') + '</div><div class="orb-label">' + (orbLabels[thisPrize] || 'TAP') + '</div></div>';
+      orb.innerHTML = '<div class="orb-glow"></div><div class="orb-inner"><div class="orb-icon">&#10024;</div><div class="orb-label">PICK ME</div></div>';
       (function(idx) {
         orb.addEventListener('click', function() {
-          if (_orbTapCallback) {
-            var cb = _orbTapCallback;
-            _orbTapCallback = null;
-            cb(idx);
-          }
+          if (_orbTapCallback) { var cb = _orbTapCallback; _orbTapCallback = null; cb(idx); }
         });
       })(i);
       container.appendChild(orb);
-      // Stagger animation
-      (function(el, delay_ms) {
-        setTimeout(function() { el.classList.add('orb-in'); }, delay_ms);
-      })(orb, i * 400);
+      (function(el, ms) { setTimeout(function() { el.classList.add('orb-in'); }, ms); })(orb, i * 400);
     }
 
     screen.style.display = 'flex';
@@ -830,27 +1277,23 @@ const UI = (() => {
 
   async function revealBonusOrbs(prizes, winPosition, chosenIdx) {
     var labels = { red_spin:'RED SPIN', pick_choose:'PICK & CHOOSE', hold_spin:'HOLD & SPIN' };
-    var icons  = { red_spin:'🔴', pick_choose:'⭐', hold_spin:'🪙' };
-
+    var icons  = { red_spin:'RS', pick_choose:'PC', hold_spin:'HS' };
     for (var i = 0; i < prizes.length; i++) {
-      var orb = $('orb-' + i);
+      var orb   = $('orb-' + i);
       if (!orb) continue;
       var icon  = orb.querySelector('.orb-icon');
       var label = orb.querySelector('.orb-label');
       if (icon)  icon.textContent  = icons[prizes[i]]  || '?';
       if (label) label.textContent = labels[prizes[i]] || prizes[i];
-      if (i === winPosition) {
-        orb.classList.add('orb-winner');
-      } else {
-        orb.classList.add('orb-loser');
-      }
+      if (i === winPosition) orb.classList.add('orb-winner');
+      else                   orb.classList.add('orb-loser');
     }
     await delay(800);
   }
 
   async function endBonusOrbScreen(winPrize) {
     var labels = { red_spin:'RED SPIN!', pick_choose:'PICK & CHOOSE!', hold_spin:'HOLD & SPIN!' };
-    showToast('🎉 ' + (labels[winPrize] || winPrize), 2500);
+    showToast((labels[winPrize] || winPrize), 2500);
     Audio.play('win_big');
     await delay(1500);
     var screen = $('bonus-orb-screen');
@@ -858,110 +1301,113 @@ const UI = (() => {
     setControlsEnabled(true);
   }
 
-  // Show BONUS letter partial win — yellow highlight only, no toast (treat as normal win)
-  // Full 5-letter BONUS still triggers orb screen via triggerBonusFeature flag
   function showBonusLetterWin(count, amount, row) {
-    // Flash the row — use direct cell styling (visible through red overlay)
-    // Canvas paylines are behind the red overlay so we use borders instead
     if (row >= 0 && row <= 2) {
-      var flashCells = [];
+      var flashList = [];
       for (var col = 0; col < count; col++) {
         var cell = document.getElementById('sc-' + col + '-' + row);
         if (cell) {
-          cell.classList.add('win-flash', 'letter-win-flash');
-          cell.style.outline = '3px solid #f5d878';
-          cell.style.outlineOffset = '-2px';
-          flashCells.push(cell);
+          var img = cell.querySelector('img');
+          var isLetter = img && (
+            img.src.indexOf('letter_b') >= 0 || img.src.indexOf('letter_o') >= 0 ||
+            img.src.indexOf('letter_n') >= 0 || img.src.indexOf('letter_u') >= 0 ||
+            img.src.indexOf('letter_s') >= 0
+          );
+          if (isLetter) {
+            cell.classList.add('win-flash', 'letter-win-flash');
+            cell.style.outline = '3px solid #f5d878';
+            cell.style.outlineOffset = '-2px';
+            flashList.push(cell);
+          }
         }
       }
       setTimeout(function() {
-        flashCells.forEach(function(c) {
-          c.classList.remove('win-flash', 'letter-win-flash');
-          c.style.outline = '';
-          c.style.outlineOffset = '';
-        });
+        for (var fi = 0; fi < flashList.length; fi++) {
+          flashList[fi].classList.remove('win-flash', 'letter-win-flash');
+          flashList[fi].style.outline = '';
+          flashList[fi].style.outlineOffset = '';
+        }
       }, 1500);
     }
   }
 
-  // ── ADDITIONAL RED SPINS WON ANIMATION ──────────────────────────────────
-  async function showAdditionalRedSpinsWon() {
-    // Flash "Additional Red Spins Won!" text on screen
+  async function showAdditionalRedSpinsWon(sourceLabel, roundIndex, totalRounds) {
     var el = document.getElementById('additional-rs-banner');
     if (!el) return;
-    el.style.display = 'flex';
-    // Animate in
-    el.style.opacity = '0';
+    var subEl = document.getElementById('additional-rs-sub');
+    if (subEl) {
+      var fromText  = sourceLabel ? 'From: ' + sourceLabel : '';
+      var roundText = totalRounds > 1 ? '  |  Round ' + roundIndex + ' of ' + totalRounds : '';
+      subEl.textContent = (fromText + roundText).trim() || 'Get Ready...';
+    }
+    var tapEl = document.getElementById('additional-rs-tap');
+    if (tapEl) tapEl.textContent = 'Starting Next Round...';
+    el.style.display   = 'flex';
+    el.style.opacity   = '0';
     el.style.transform = 'scale(0.7)';
-    el.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.22,1,0.36,1)';
+    el.style.transition = 'opacity 0.35s ease, transform 0.35s cubic-bezier(0.22,1,0.36,1)';
     await delay(30);
-    el.style.opacity = '1';
+    el.style.opacity   = '1';
     el.style.transform = 'scale(1)';
-    await delay(2200); // Hold for player to read
-    // Fade out
-    el.style.opacity = '0';
-    el.style.transform = 'scale(1.1)';
+    await delay(2600);
+    el.style.opacity   = '0';
+    el.style.transform = 'scale(1.08)';
     await delay(350);
-    el.style.display = 'none';
+    el.style.display   = 'none';
     el.style.transition = '';
   }
 
-  // ── HELPERS ───────────────────────────────────────────────────────────
   function setControlsEnabled(enabled) {
-    ['spin-btn','bet-up','bet-down','max-bet-btn','auto-btn'].forEach(id => {
-      const el = $(id); if (el) el.disabled = !enabled;
-    });
-    document.querySelectorAll('.line-btn,.bet-btn').forEach(btn => {
-      btn.style.pointerEvents = enabled ? '' : 'none';
-      btn.style.opacity = enabled ? '' : '0.45';
-    });
+    var ids = ['spin-btn','bet-up','bet-down','max-bet-btn','auto-btn'];
+    for (var i = 0; i < ids.length; i++) {
+      var el = $(ids[i]); if (el) el.disabled = !enabled;
+    }
+    var btns = document.querySelectorAll('.line-btn,.bet-btn');
+    for (var j = 0; j < btns.length; j++) {
+      btns[j].style.pointerEvents = enabled ? '' : 'none';
+      btns[j].style.opacity       = enabled ? '' : '0.45';
+    }
   }
 
-  function showToast(msg, dur=2500) {
-    const t = $('toast'); if (!t) return;
+  function showToast(msg, dur) {
+    if (dur === undefined) dur = 2500;
+    var t = $('toast'); if (!t) return;
     t.textContent = msg; t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), dur);
+    setTimeout(function() { t.classList.remove('show'); }, dur);
   }
 
   function showMessage(msg) { showToast(msg); }
 
   function onSpinStart() {
     clearPaylines(); clearHighlights(); updateWinDisplay(0);
-    updateBalance(GameState.balance); // FIX: show deducted balance immediately on button press
-    reelEls.forEach(r => { if(r) r.classList.add('spinning'); });
+    updateBalance(GameState.balance);
+    for (var i = 0; i < reelEls.length; i++) { if (reelEls[i]) reelEls[i].classList.remove('spinning'); }
+    if (_dismissHoldBonusWin) { _dismissHoldBonusWin(); _dismissHoldBonusWin = null; }
+    var hbwo = $('hs-bonus-win-overlay');
+    if (hbwo) {
+      hbwo.classList.remove('active');
+      var rain = hbwo.querySelector ? hbwo.querySelector('#hs-coin-rain') : null;
+      if (rain) rain.innerHTML = '';
+    }
+    clearReelCoinOverlay();
   }
 
   function onSpinComplete() {
-    reelEls.forEach(r => { if(r) r.classList.remove('spinning'); });
+    for (var i = 0; i < reelEls.length; i++) { if (reelEls[i]) reelEls[i].classList.remove('spinning'); }
     updateBalance(GameState.balance);
     updateJackpotMeters();
   }
 
-  function showReplayBanner(gameNum, time) {
-    const b=$('replay-banner'), wm=$('replay-watermark');
-    if(b){ b.textContent=`🔄 AUDIT REPLAY — GAME #${gameNum} — ${time}`; b.classList.add('active'); }
-    if(wm) wm.style.display='flex';
-  }
-
-  function showReplaySummary(summary) {
-    showToast('REPLAY: Bet $' + ((summary&&summary.totalBet)?summary.totalBet.toFixed(2):'0') + ' | Won $' + ((summary&&summary.totalWon)?summary.totalWon.toFixed(2):'0'), 4000);
-    setTimeout(()=>{
-      var _rb=$('replay-banner'); if(_rb) _rb.classList.remove('active');
-      const wm=$('replay-watermark'); if(wm) wm.style.display='none';
-    }, 4300);
-  }
-
-  // ── INSERT CASH TO PLAY TICKER ────────────────────────────────────────
-  let _insertCashTickerInterval = null;
+  var _insertCashTickerInterval = null;
 
   function _startInsertCashTicker() {
-    if (_insertCashTickerInterval) return; // already running
-    const el = $('reels-insert-msg');
+    if (_insertCashTickerInterval) return;
+    var el = $('reels-insert-msg');
     if (!el) return;
     function showMsg() {
       if (GameState.balance > 0) { _stopInsertCashTicker(); return; }
       el.classList.add('visible');
-      setTimeout(() => el.classList.remove('visible'), 2000);
+      setTimeout(function() { el.classList.remove('visible'); }, 2000);
     }
     showMsg();
     _insertCashTickerInterval = setInterval(showMsg, 5000);
@@ -969,59 +1415,56 @@ const UI = (() => {
 
   function _stopInsertCashTicker() {
     if (_insertCashTickerInterval) { clearInterval(_insertCashTickerInterval); _insertCashTickerInterval = null; }
-    const el = $('reels-insert-msg');
+    var el = $('reels-insert-msg');
     if (el) el.classList.remove('visible');
   }
 
-  // ── RED SCREEN CONTROL ───────────────────────────────────────────────
-  function flashReelRed() {
-    // Alias kept for compatibility
-    activateRedScreen();
-  }
+  function flashReelRed() { activateRedScreen(); }
 
   function activateRedScreen() {
-    const frame   = $('reel-frame');
-    const overlay = $('red-reel-overlay');
+    var frame   = $('reel-frame');
+    var overlay = $('red-reel-overlay');
     if (frame)   frame.classList.add('red-active');
     if (overlay) overlay.classList.add('active');
-    var _btb=$('bonus-total-box'); if(_btb) _btb.classList.add('visible');
+    var btb = $('bonus-total-box'); if (btb) btb.classList.add('visible');
   }
 
   function deactivateRedScreen() {
-    var _rro=$('red-reel-overlay'); if(_rro) _rro.classList.remove('active');
-    var _rf=$('reel-frame'); if(_rf) _rf.classList.remove('red-active');
-    var _btbr=$('bonus-total-box'); if(_btbr) _btbr.classList.remove('visible');
+    var rro = $('red-reel-overlay'); if (rro) rro.classList.remove('active');
+    var rf  = $('reel-frame');       if (rf)  rf.classList.remove('red-active');
+    var btb = $('bonus-total-box');  if (btb) btb.classList.remove('visible');
   }
 
-  // ── END RED SPIN IMMEDIATELY (no delay) ──────────────────────────────
-  function endRedSpinImmediate() {
-    // Only deactivate screen and re-enable controls
-    // DO NOT touch GameState.spinInProgress here — executeSpin owns that
-    deactivateRedScreen();
-    setControlsEnabled(true);
-  }
+  function endRedSpinImmediate() { deactivateRedScreen(); setControlsEnabled(true); }
 
-  function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+  function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
   return {
-    init, renderGrid, animateReelsStop, showBaseWins,
-    updateBalance, updateWinDisplay, updateBetDisplay, updateJackpotMeters,
+    init: init, renderGrid: renderGrid,
+    setPendingCoinMap: setPendingCoinMap, overlayReelCoinValues: overlayReelCoinValues, clearReelCoinOverlay: clearReelCoinOverlay,
+    animateReelsStop: animateReelsStop, showBaseWins: showBaseWins,
+    triggerHoldSpinExplosion: triggerHoldSpinExplosion,
+    updateBalance: updateBalance, updateWinDisplay: updateWinDisplay, updateBetDisplay: updateBetDisplay, updateJackpotMeters: updateJackpotMeters,
     startInsertCashTicker: _startInsertCashTicker, stopInsertCashTicker: _stopInsertCashTicker,
-    animateCreditCountup,
+    animateCreditCountup: animateCreditCountup,
     get isAnimatingCredits() { return isAnimatingCredits; },
-    skipCreditAnimation,
-    showRedSpinEntry, updateRedSpinWin, showRedSpinPaylineFlash,
-    endRedSpin: endRedSpinBonus, endRedSpinBonus,
-    showHoldSpinBoard, animateHoldSpinning, animateCoinLand,
-    updateRespinCounter, showBlackoutCelebration, endHoldSpin, updateHoldTotal,
-    showPickChooseGrid, revealPickTile, revealAllPickTiles,
-    setPickTapCallback, endPickChoose, updatePickMatches, showPickChooseWin,
-    showJackpotCelebration, setControlsEnabled,
-    showBonusOrbScreen, revealBonusOrbs, endBonusOrbScreen, setOrbTapCallback,
-    showBonusLetterWin,
-    flashReelRed, activateRedScreen, deactivateRedScreen, endRedSpinImmediate,
-    showAdditionalRedSpinsWon,
-    showToast, showMessage, onSpinStart, onSpinComplete, clearPaylines,
-    showReplayBanner, showReplaySummary,
+    skipCreditAnimation: skipCreditAnimation,
+    showRedSpinEntry: showRedSpinEntry, updateRedSpinWin: updateRedSpinWin, showRedSpinPaylineFlash: showRedSpinPaylineFlash,
+    endRedSpin: endRedSpinBonus, endRedSpinBonus: endRedSpinBonus,
+    showHoldSpinBoard: showHoldSpinBoard, animateHoldSpinning: animateHoldSpinning,
+    startHoldSpinning: startHoldSpinning, clearHoldSpinning: clearHoldSpinning, animateCoinLand: animateCoinLand,
+    updateRespinCounter: updateRespinCounter, showBlackoutCelebration: showBlackoutCelebration,
+    endHoldSpin: endHoldSpin, updateHoldTotal: updateHoldTotal,
+    flashJackpotCoin: flashJackpotCoin, showHoldBonusWinScreen: showHoldBonusWinScreen,
+    _spawnLightningBurst: _spawnLightningBurst, _spawnCounterSparks: _spawnCounterSparks,
+    showPickChooseGrid: showPickChooseGrid, revealPickTile: revealPickTile, _lockAllPickTiles: _lockAllPickTiles,
+    setPickTapCallback: setPickTapCallback, endPickChoose: endPickChoose, updatePickMatches: updatePickMatches, showPickChooseWin: showPickChooseWin,
+    showJackpotCelebration: showJackpotCelebration, setControlsEnabled: setControlsEnabled,
+    showBonusOrbScreen: showBonusOrbScreen, revealBonusOrbs: revealBonusOrbs, endBonusOrbScreen: endBonusOrbScreen, setOrbTapCallback: setOrbTapCallback,
+    showBonusLetterWin: showBonusLetterWin,
+    flashReelRed: flashReelRed, activateRedScreen: activateRedScreen, deactivateRedScreen: deactivateRedScreen, endRedSpinImmediate: endRedSpinImmediate,
+    showAdditionalRedSpinsWon: showAdditionalRedSpinsWon, showRedSpinEndCelebration: showRedSpinEndCelebration,
+    showToast: showToast, showMessage: showMessage, onSpinStart: onSpinStart, onSpinComplete: onSpinComplete,
+    clearPaylines: clearPaylines, showActivePaylines: showActivePaylines,
   };
 })();

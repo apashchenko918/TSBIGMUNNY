@@ -48,7 +48,8 @@ const Audio = (() => {
     _load('splash_welcome', 'assets/audio/splash_welcome.wav');
   }
 
-  function _load(key, src, loop = false) {
+  function _load(key, src, loop) {
+    if (loop === undefined) loop = false;
     try {
       const el = document.createElement('audio');
       el.src = src;
@@ -60,7 +61,8 @@ const Audio = (() => {
   }
 
   // Play an MP3 element — returns the playing element
-  function _play(key, vol = 1.0) {
+  function _play(key, vol) {
+    if (vol === undefined) vol = 1.0;
     const el = mp3[key];
     if (!el || muted) return null;
     try {
@@ -105,7 +107,9 @@ const Audio = (() => {
   }
 
   // ── WEB AUDIO SYNTH HELPERS ───────────────────────────────────────
-  function _tone(freq, type, t0, t1, vol = 0.35, endVol = 0.001) {
+  function _tone(freq, type, t0, t1, vol, endVol) {
+    if (vol === undefined) vol = 0.35;
+    if (endVol === undefined) endVol = 0.001;
     if (!ctx || muted) return;
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.type = type; o.frequency.value = freq;
@@ -115,7 +119,9 @@ const Audio = (() => {
     o.start(t0); o.stop(t1);
   }
 
-  function _noise(dur, t0, vol = 0.2, freq = 800) {
+  function _noise(dur, t0, vol, freq) {
+    if (vol === undefined) vol = 0.2;
+    if (freq === undefined) freq = 800;
     if (!ctx || muted) return;
     const buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
     const d   = buf.getChannelData(0);
@@ -254,13 +260,59 @@ const Audio = (() => {
       _play('hold_trigger', 0.40);
     },
 
-    // Coin landing on board — synthesized thud
+    // Coin landing on board — generic thud (coin 7+)
     hold_spin_land() {
       if (!ctx) return;
       const t = ctx.currentTime;
       _tone(280, 'square', t, t + 0.04, 0.30, 0.01);
       _noise(0.08, t, 0.20, 450);
       _tone(560, 'triangle', t, t + 0.12, 0.15, 0.001);
+    },
+
+    // Coins #1–5 landing — high-pitched chime ding
+    hold_spin_coin_chime() {
+      if (!ctx) return;
+      const t = ctx.currentTime;
+      _tone(1760, 'sine',     t,        t + 0.18, 0.28, 0.001); // high A6
+      _tone(2217, 'sine',     t,        t + 0.12, 0.14, 0.001); // C#7 overtone
+      _noise(0.04,            t, 0.06, 2400);
+    },
+
+    // Coin #6 — heavy slam thud + electric crack
+    hold_spin_coin_slam() {
+      if (!ctx) return;
+      const t = ctx.currentTime;
+      _tone(80,  'sawtooth',  t,        t + 0.18, 0.55, 0.001);
+      _tone(55,  'square',    t,        t + 0.22, 0.45, 0.001);
+      _noise(0.20,            t, 0.50, 180);
+      _noise(0.06,            t + 0.02, 0.35, 3200); // electric crack
+      _tone(440, 'square',    t + 0.02, t + 0.06, 0.20, 0.001);
+      _tone(880, 'triangle',  t + 0.08, t + 0.28, 0.18, 0.001); // shimmer
+    },
+
+    // ── H&S RESPIN ESCALATING AUDIO ─────────────────────────────────────
+    // respinNum = total respin count (1, 2, 3...); counterVal = display counter (3, 2, 1)
+    // Escalates from calm → tense → frantic as counter drops and respins accumulate
+    holdSpinRespin(respinNum, counterVal) {
+      if (!ctx) return;
+      const t = ctx.currentTime;
+      if (counterVal === 1) {
+        // FRANTIC — last spin, maximum tension
+        _tone(880,  'square',   t,        t + 0.06, 0.30, 0.001);
+        _tone(1320, 'square',   t + 0.04, t + 0.10, 0.25, 0.001);
+        _tone(1760, 'triangle', t + 0.08, t + 0.16, 0.22, 0.001);
+        _noise(0.03,            t + 0.02, 0.18, 2800);
+        _noise(0.03,            t + 0.12, 0.15, 3200);
+      } else if (respinNum >= 4 || counterVal === 2) {
+        // TENSE — later respins or penultimate counter
+        _tone(660,  'square',   t,        t + 0.08, 0.22, 0.001);
+        _tone(990,  'triangle', t + 0.05, t + 0.14, 0.18, 0.001);
+        _noise(0.025,           t,        0.12, 2000);
+      } else {
+        // CALM — early respins
+        _tone(440, 'triangle', t,        t + 0.10, 0.16, 0.001);
+        _tone(660, 'sine',     t + 0.06, t + 0.16, 0.12, 0.001);
+      }
     },
 
     // Hold & Spin end — use uploaded fanfare file
@@ -463,6 +515,9 @@ const Audio = (() => {
     startAmbientMusic, stopAmbientMusic,
     startRedSpinMusic, stopRedSpinMusic,
     startHoldSpinMusic, stopHoldSpinMusic,
+    holdSpinRespin: function(respinNum, counterVal) {
+      if (sounds.holdSpinRespin) sounds.holdSpinRespin(respinNum, counterVal);
+    },
     startPickMusic, stopPickMusic,
   };
 })();

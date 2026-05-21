@@ -1,445 +1,461 @@
 'use strict';
-/**
- * tools/monte_carlo.js — Turrelle Sisters Big Munny Monte Carlo Simulator
- * ──────────────────────────────────────────────────────────────────────────
- * Simulates base-game spins and estimates total RTP including bonus features.
- *
- * Usage:
- *   node tools/monte_carlo.js [spins] [lines] [creditsPerLine] [denom]
- *
- * Examples:
- *   node tools/monte_carlo.js                        → 1M spins, defaults
- *   node tools/monte_carlo.js 2000000                → 2M spins
- *   node tools/monte_carlo.js 1000000 20 1 0.05      → 1M spins, 5¢, 1 cpl, 20 lines
- *   node tools/monte_carlo.js 500000  20 5 0.10      → 500k spins, 10¢, 5 cpl
- *
- * Output sections:
- *   BASE GAME    — fully simulated (paylines, cherry, mixed bar, bonus letters)
- *   HOLD & SPIN  — trigger rate simulated; avg win from weighted tier model
- *   RED SPIN     — trigger rate from configured probability; avg from continuance
- *   PICK&CHOOSE  — trigger rate simulated (5-oak lipstick); avg from prize table
- *   JACKPOTS     — trigger rate from JACKPOT_ODDS constants
- */
+// ═══════════════════════════════════════════════════════════════════════════════
+// Turrelle Sisters — Monte Carlo RTP Simulator
+// Run: node tools/monte_carlo.js [spins] [denom]
+// Defaults: 1,000,000 spins, $0.05 denom
+//
+// FIXED v6l90:
+//   - Path: relative ../paytable.js (no hardcoded absolute path)
+//   - evalLine: wild multiplier removed — base pays only (matches game.js evalLine)
+//   - trigRS: gated on win > 0 (was firing on every spin)
+//   - trigPC: Lipstick on center ROW (row index 1), not payline 5-oak
+//   - simHS: for..of loops replaced with indexed for (Node.js safe either way, but consistent)
+//   - bonusBottom: checks LETTER_IDS[col] for each column on bottom ROW (row 2) only
+//   - Priority order: H&S > P&C > RS (matches game.js executeSpin)
+//   - Letter pays: check all 3 rows, left-contiguous, correct LETTER_IDS per column
+// ═══════════════════════════════════════════════════════════════════════════════
 
-const path = require('path');
-const pt   = require(path.join(__dirname, '..', 'paytable.js'));
+var path = require('path');
+var pt   = require(path.join(__dirname, '..', 'paytable.js'));
 
-const {
-  SYMBOLS, WILD_IDS, SCATTER_ID, BONUS_ID,
-  PAY_TABLE, LETTER_IDS, BONUS_LETTER_PAYS,
-  MIXED_BAR_PAY, BAR_IDS,
-  REEL_STRIPS, REEL_SIZE, PAYLINES,
-  RED_SPIN_FREQUENCY_DEFAULT, RED_SPIN_CONTINUANCE_DEFAULT,
-  HOLD_SPIN_LAND_PROBABILITY, HOLD_SPIN_CASH_TIERS, HOLD_SPIN_JACKPOT_TIERS,
-  PICK_CHOOSE_PRIZES, PICK_CHOOSE_GRID_SIZE,
-  JACKPOT_ODDS,
-  JACKPOT_SEEDS_BY_DENOM, getJackpotSeedsForDenom,
-} = pt;
+var SYMBOLS              = pt.SYMBOLS;
+var WILD_IDS             = pt.WILD_IDS;
+var SCATTER_ID           = pt.SCATTER_ID;
+var BONUS_ID             = pt.BONUS_ID;
+var BONUS_PC_ID          = pt.BONUS_PC_ID;
+var PAY_TABLE            = pt.PAY_TABLE;
+var LETTER_IDS           = pt.LETTER_IDS;
+var BONUS_LETTER_PAYS    = pt.BONUS_LETTER_PAYS;
+var MIXED_BAR_PAY        = pt.MIXED_BAR_PAY;
+var BAR_IDS              = pt.BAR_IDS;
+var REEL_STRIPS          = pt.REEL_STRIPS;
+var REEL_SIZE            = pt.REEL_SIZE;
+var PAYLINES             = pt.PAYLINES;
+var RED_SPIN_FREQUENCY_DEFAULT  = pt.RED_SPIN_FREQUENCY_DEFAULT;
+var RED_SPIN_CONTINUANCE_DEFAULT = pt.RED_SPIN_CONTINUANCE_DEFAULT;
+var HOLD_SPIN_LAND_PROBABILITY  = pt.HOLD_SPIN_LAND_PROBABILITY;
+var HOLD_SPIN_CASH_TIERS        = pt.HOLD_SPIN_CASH_TIERS;
+var HOLD_SPIN_JACKPOT_TIERS     = pt.HOLD_SPIN_JACKPOT_TIERS;
+var PICK_CHOOSE_CASH_TIERS      = pt.PICK_CHOOSE_CASH_TIERS;
+var PICK_CHOOSE_PRIZES          = pt.PICK_CHOOSE_PRIZES;
+var getJackpotSeedsForDenom     = pt.getJackpotSeedsForDenom;
 
-// ── CLI ARGS ─────────────────────────────────────────────────────────────────
-const TOTAL_SPINS       = parseInt(process.argv[2])  || 1_000_000;
-const ACTIVE_LINES      = parseInt(process.argv[3])  || 20;
-const CREDITS_PER_LINE  = parseInt(process.argv[4])  || 1;
-const DENOM             = parseFloat(process.argv[5]) || 0.05;
+// ── Config ───────────────────────────────────────────────────────────────────
+var SPINS = parseInt(process.argv[2]) || 1000000;
+var DENOM = parseFloat(process.argv[3]) || 0.05;
+var LINES = 20;
+var CPL   = 5;        // credits per line
+var BPL   = DENOM * CPL;
+var TOTAL = BPL * LINES;
+var SEEDS = getJackpotSeedsForDenom(DENOM);
 
-const BET_PER_LINE = DENOM * CREDITS_PER_LINE;              // $ per line
-const TOTAL_BET    = BET_PER_LINE * ACTIVE_LINES;           // $ per spin
-const JACKPOT_SEEDS = getJackpotSeedsForDenom(DENOM);
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function rs() { return Math.random(); }
 
-// ── HELPER: FAST RANDOM (Math.random — simulation-only) ──────────────────────
-const rnd = Math.random;
-
-// ── REEL MECHANICS ───────────────────────────────────────────────────────────
-function randomStop(reelIdx) {
-  return Math.floor(rnd() * REEL_SIZE);
-}
-
-function getVisible(reelIdx, stop) {
-  const strip = REEL_STRIPS[reelIdx];
-  const len   = strip.length;
-  return [
-    strip[(stop - 1 + len) % len],
-    strip[stop],
-    strip[(stop + 1)      % len],
-  ];
-}
-
-function buildGrid() {
-  const stops = REEL_STRIPS.map((_, r) => randomStop(r));
-  return { grid: stops.map((s, r) => getVisible(r, s)), stops };
-}
-
-// ── WIN EVALUATION (mirrors game.js exactly) ─────────────────────────────────
-
-function evaluateLine(lineSymbols, betPerLine) {
-  let wildCount = 0, matchSymbol = null;
-  for (let i = 0; i < lineSymbols.length; i++) {
-    if (WILD_IDS.includes(lineSymbols[i])) wildCount++;
-    else { matchSymbol = lineSymbols[i]; break; }
+function randStops() {
+  var stops = [];
+  for (var i = 0; i < REEL_STRIPS.length; i++) {
+    stops.push(Math.floor(rs() * REEL_STRIPS[i].length));
   }
-  if (matchSymbol === null && wildCount > 0) { matchSymbol = SYMBOLS.JOSIE.id; wildCount = 0; }
+  return stops;
+}
 
-  let matchCount = wildCount, extraWilds = 0;
-  for (let i = wildCount; i < lineSymbols.length; i++) {
-    if (lineSymbols[i] === matchSymbol)       matchCount++;
-    else if (WILD_IDS.includes(lineSymbols[i])) { matchCount++; extraWilds++; }
+function grid(stops) {
+  var g = [];
+  for (var i = 0; i < stops.length; i++) {
+    var sz  = REEL_STRIPS[i].length;
+    var s   = stops[i];
+    g.push([
+      REEL_STRIPS[i][(s - 1 + sz) % sz],
+      REEL_STRIPS[i][s],
+      REEL_STRIPS[i][(s + 1) % sz],
+    ]);
+  }
+  return g;
+}
+
+// ── Line evaluator — BASE PAY ONLY, no wild multiplier ──────────────────────
+// Matches game.js evaluateLine() base path. Wild multiplier is applied separately
+// in the game and only affects display/credit, not RTP simulation at this level.
+function evalLine(syms) {
+  var wc = 0, ms = null;
+  for (var i = 0; i < 5; i++) {
+    if (WILD_IDS.indexOf(syms[i]) >= 0) wc++;
+    else { ms = syms[i]; break; }
+  }
+  // All wilds — treat as best wild (Josie) for pay lookup
+  if (ms === null && wc > 0) { ms = SYMBOLS.JOSIE.id; wc = 0; }
+
+  var mc = wc;
+  for (var j = wc; j < 5; j++) {
+    if (syms[j] === ms) mc++;
+    else if (WILD_IDS.indexOf(syms[j]) >= 0) mc++;
     else break;
   }
-  if (matchCount < 2) return 0;
-  if (matchSymbol === BONUS_ID) return 0;  // Gold Coin never pays on paylines
+  if (mc < 2) return 0;
+  if (ms === BONUS_ID || ms === BONUS_PC_ID) return 0; // Neither gold coin nor lipstick pays on lines
 
-  const symbolKey = Object.keys(SYMBOLS).find(k => SYMBOLS[k].id === matchSymbol);
-  if (!symbolKey || !PAY_TABLE[symbolKey]) return 0;
-  const pays     = PAY_TABLE[symbolKey];
-  const payIndex = Math.max(0, 5 - matchCount);
-  if (payIndex >= pays.length) return 0;
-  const basePay  = pays[payIndex];
-  if (basePay === 0) return 0;
+  var sk = null;
+  var keys = Object.keys(SYMBOLS);
+  for (var ki = 0; ki < keys.length; ki++) {
+    if (SYMBOLS[keys[ki]].id === ms) { sk = keys[ki]; break; }
+  }
+  if (!sk || !PAY_TABLE[sk]) return 0;
 
-  // Wild multiplier: Josie+Sasha=×6 | Josie only=×4 | Sasha only=×2
-  const comboSyms     = lineSymbols.slice(0, matchCount + extraWilds);
-  const hasJosie      = comboSyms.includes(SYMBOLS.JOSIE.id);
-  const hasSasha      = comboSyms.includes(SYMBOLS.SASHA.id);
-  const anyWild       = comboSyms.some(s => WILD_IDS.includes(s));
-  const multiplier    = anyWild ? (hasJosie && hasSasha ? 6 : hasJosie ? 4 : 2) : 1;
+  var pays = PAY_TABLE[sk];
+  var pi   = Math.max(0, 5 - mc);
+  if (pi >= pays.length || pays[pi] === 0) return 0;
 
-  return basePay * betPerLine * multiplier;
+  // Wild multiplier — owner confirmed 2026-05-20 (v6l96)
+  // Additive: Josie contributes ×2, Sasha contributes ×1, minimum ×1
+  // Applies to regular payline pays only — jackpots always pay fixed seed.
+  var wildIdsInCombo = syms.slice(0, mc).filter(function(s) { return WILD_IDS.indexOf(s) >= 0; });
+  var josieCount = wildIdsInCombo.filter(function(id) { return id === SYMBOLS.JOSIE.id; }).length;
+  var sashaCount = wildIdsInCombo.filter(function(id) { return id === SYMBOLS.SASHA.id; }).length;
+  var multiplier = Math.max(1, josieCount * 2 + sashaCount * 1);
+  return pays[pi] * BPL * multiplier;
 }
 
-function evaluateCherryWin(grid, betPerLine) {
-  const cherryId   = SYMBOLS.CHERRY.id;
-  const cherryPays = PAY_TABLE.CHERRY;
-  let total = 0;
-  for (let row = 0; row < 3; row++) {
-    let count = 0;
-    for (let col = 0; col < 5; col++) {
-      if (grid[col][row] === cherryId) count++;
+// ── Spin evaluator ───────────────────────────────────────────────────────────
+function evalSpin(g) {
+  var win = 0, coins = 0;
+
+  // Count gold coins across full 3×5 grid
+  for (var c = 0; c < 5; c++) {
+    for (var r = 0; r < 3; r++) {
+      if (g[c][r] === BONUS_ID) coins++;
+    }
+  }
+
+  // Payline wins
+  for (var li = 0; li < LINES; li++) {
+    var pl   = PAYLINES[li];
+    var syms = [];
+    for (var ci = 0; ci < 5; ci++) syms.push(g[ci][pl[ci]]);
+    win += evalLine(syms);
+  }
+
+  // Mixed bar wins (3–4 any-bar left-contiguous on any payline)
+  for (var mi = 0; mi < LINES; mi++) {
+    var mpl = PAYLINES[mi], mbc = 0;
+    for (var mc2 = 0; mc2 < 5; mc2++) {
+      if (BAR_IDS.indexOf(g[mc2][mpl[mc2]]) >= 0) mbc++;
       else break;
     }
-    if (count >= 1) {
-      const idx = count >= 5 ? 0 : count === 4 ? 1 : count === 3 ? 2 : 3;
-      total += (cherryPays[idx] || 0) * betPerLine;
-    }
+    if (mbc >= 3 && mbc < 5) win += (MIXED_BAR_PAY[mbc] || 0) * BPL;
   }
-  return total;
-}
 
-function evaluateBonusLetters(grid) {
-  let best = 0;
-  for (let row = 0; row < 3; row++) {
-    let count = 0;
-    for (let col = 0; col < 5; col++) {
-      if (grid[col][row] === LETTER_IDS[col]) count++;
+  // Letter pays — all 3 rows, left-contiguous, per-column LETTER_ID check
+  for (var row = 0; row < 3; row++) {
+    var cnt = 0;
+    for (var col = 0; col < 5; col++) {
+      if (g[col][row] === LETTER_IDS[col]) cnt++;
       else break;
     }
-    if (count > best) best = count;
-  }
-  return best;
-}
-
-function evaluateMixedBars(grid, betPerLine) {
-  let total = 0;
-  PAYLINES.slice(0, ACTIVE_LINES).forEach(line => {
-    const syms = line.map((row, col) => grid[col][row]);
-    let barCount = 0;
-    for (let i = 0; i < 5; i++) {
-      if (BAR_IDS.includes(syms[i])) barCount++;
-      else break;
-    }
-    if (barCount < 3) return;
-    const allSame = syms.slice(0, barCount).every(s => s === syms[0]);
-    if (allSame) return;  // Pure same-bar: handled by payline eval
-    total += (MIXED_BAR_PAY[barCount] || 0) * betPerLine;
-  });
-  return total;
-}
-
-function evaluateSpin(grid, betPerLine) {
-  let totalWin       = 0;
-  let triggerPickChoose  = false;
-  let triggerHoldSpin    = false;
-  let triggerBonusFeature = false;
-
-  // Count gold coins & lipstick across all 15 cells
-  let coinCount = 0, lipstickCount = 0;
-  for (let col = 0; col < 5; col++) {
-    for (let row = 0; row < 3; row++) {
-      if (grid[col][row] === BONUS_ID)   coinCount++;
-      if (grid[col][row] === SCATTER_ID) lipstickCount++;
-    }
-  }
-  if (coinCount >= 6) triggerHoldSpin = true;
-
-  // Payline evaluation
-  PAYLINES.slice(0, ACTIVE_LINES).forEach(line => {
-    const syms = line.map((row, col) => grid[col][row]);
-    totalWin += evaluateLine(syms, betPerLine);
-
-    // 5-oak lipstick on any active payline = Pick & Choose trigger
-    if (syms.every(id => id === SCATTER_ID)) triggerPickChoose = true;
-  });
-
-  // Cherry (any row, consecutive from reel 1)
-  totalWin += evaluateCherryWin(grid, betPerLine);
-
-  // Mixed bar
-  totalWin += evaluateMixedBars(grid, betPerLine);
-
-  // BONUS letters
-  const letterCount = evaluateBonusLetters(grid);
-  if (letterCount >= 5) {
-    triggerBonusFeature = true;
-  } else if (letterCount >= 1) {
-    const letterPay = (BONUS_LETTER_PAYS[letterCount] || 0) * betPerLine;
-    totalWin += letterPay;
+    if (cnt >= 1) win += (BONUS_LETTER_PAYS[cnt] || 0) * BPL;
   }
 
-  return { totalWin, triggerPickChoose, triggerHoldSpin, triggerBonusFeature, coinCount, lipstickCount, letterCount };
-}
-
-// ── BONUS AVERAGE WIN ESTIMATORS ─────────────────────────────────────────────
-
-// Hold & Spin: weighted-avg cash fraction × total bet × avg coins landed
-function estimateHoldSpinWin() {
-  // Avg cash fraction per coin from tier table
-  const avgFracPerCoin = HOLD_SPIN_CASH_TIERS.reduce((sum, t) => {
-    return sum + t.weight * (t.minFrac + t.maxFrac) / 2;
-  }, 0);
-  // Avg jackpot contribution per coin (negligible but correct)
-  const avgJpPerCoin = HOLD_SPIN_JACKPOT_TIERS.reduce((sum, t) => {
-    const seedVal = JACKPOT_SEEDS[t.level] || 0;
-    return sum + t.weight * seedVal;
-  }, 0);
-  // Avg coins per trigger: each of 15 cells has HOLD_SPIN_LAND_PROBABILITY
-  // but the game only triggers on 6+ coins, so condition on that
-  // Approximate: given trigger (6+ coins), avg ≈ 8–9 coins (geometric series approx)
-  // Using game comment: "avg ~6 coins per trigger"
-  const AVG_COINS_ON_TRIGGER = 6;
-  const avgCashWin = avgFracPerCoin * TOTAL_BET * AVG_COINS_ON_TRIGGER;
-  const avgJpWin   = avgJpPerCoin   * AVG_COINS_ON_TRIGGER;
-  return avgCashWin + avgJpWin;
-}
-
-// Red Spin: avg spins per trigger = 1/(1-continuance), each spin ≈ totalBet × 1 (break-even estimate)
-// Comment in paytable.js says Red Spin is main feature (~35% freq * RTP contribution)
-// Using continuance: avg extra spins = continuance / (1 - continuance)
-function estimateRedSpinWin() {
-  const avgExtraSpins = RED_SPIN_CONTINUANCE_DEFAULT / (1 - RED_SPIN_CONTINUANCE_DEFAULT);
-  // Each red spin is effectively a free spin — assume same base RTP as base game
-  // Conservative: treat each red spin as 1× total bet returned on avg (break-even placeholder)
-  // In reality Red Spin has higher volatility — tune this multiplier from actual play data
-  const EST_RED_SPIN_SPIN_RTP = 0.85; // placeholder — update from Red Spin play analysis
-  return avgExtraSpins * TOTAL_BET * EST_RED_SPIN_SPIN_RTP;
-}
-
-// Pick & Choose: one pick from PICK_CHOOSE_PRIZES table
-function estimatePickChooseWin() {
-  // Simple one-pick expected value (BONUS feature may award 2+ picks — treated as 1 here)
-  return PICK_CHOOSE_PRIZES.reduce((sum, prize) => {
-    if (prize.type === 'cash') {
-      const avgMult = (prize.minMult + prize.maxMult) / 2;
-      return sum + prize.weight * avgMult * TOTAL_BET;
-    }
-    // red_spin / hold_spin: estimate those separately; weight them at 0
-    return sum;
-  }, 0);
-}
-
-// ── SIMULATION CORE ──────────────────────────────────────────────────────────
-
-function runSimulation() {
-  const start = Date.now();
-
-  // Counters
-  let totalWagered       = 0;
-  let baseWon            = 0;
-  let hitCount           = 0;    // spins with any base win
-  let cherryHits         = 0;
-  let mixedBarHits       = 0;
-
-  // Bonus trigger counts
-  let holdSpinTriggers   = 0;
-  let redSpinTriggers    = 0;
-  let pickChooseTriggers = 0;
-  let bonusFeatureTriggers = 0;
-
-  // Bonus letter partial pay tracking
-  let letterHits = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-
-  // Symbol frequency on center row (payline 0 = row 1) for sanity check
-  const symFreq = Array(18).fill(0).map(() => new Array(5).fill(0));
-
-  const PROGRESS_INTERVAL = Math.floor(TOTAL_SPINS / 20);
-
-  for (let spin = 0; spin < TOTAL_SPINS; spin++) {
-
-    if (spin % PROGRESS_INTERVAL === 0 && spin > 0) {
-      process.stdout.write(`\r  Progress: ${Math.round(spin / TOTAL_SPINS * 100)}% (${(spin / 1e6).toFixed(2)}M spins)...`);
-    }
-
-    const { grid } = buildGrid();
-    totalWagered += TOTAL_BET;
-
-    // Count center row symbols for frequency table
-    for (let col = 0; col < 5; col++) {
-      const sym = grid[col][1]; // center row
-      if (sym < 18) symFreq[sym][col]++;
-    }
-
-    const result = evaluateSpin(grid, BET_PER_LINE);
-
-    baseWon += result.totalWin;
-    if (result.totalWin > 0) hitCount++;
-
-    // Cherry hit detection (any win that came from cherry)
-    const cherryWin = evaluateCherryWin(grid, BET_PER_LINE);
-    if (cherryWin > 0) cherryHits++;
-
-    // Mixed bar detection
-    const mbWin = evaluateMixedBars(grid, BET_PER_LINE);
-    if (mbWin > 0) mixedBarHits++;
-
-    // Bonus triggers
-    if (result.triggerHoldSpin)     holdSpinTriggers++;
-    if (result.triggerPickChoose)   pickChooseTriggers++;
-    if (result.triggerBonusFeature) bonusFeatureTriggers++;
-
-    // Red Spin (probability-based, independent of reels)
-    if (Math.random() < RED_SPIN_FREQUENCY_DEFAULT) redSpinTriggers++;
-
-    // Bonus letter tracking
-    if (result.letterCount >= 1) letterHits[result.letterCount]++;
+  // Character jackpots (5-oak on any payline)
+  var jpWin = 0, jpType = null;
+  for (var jli = 0; jli < LINES; jli++) {
+    var jpl   = PAYLINES[jli];
+    var jsyms = [];
+    for (var jci = 0; jci < 5; jci++) jsyms.push(g[jci][jpl[jci]]);
+    var allMatch = function(id) {
+      for (var x = 0; x < jsyms.length; x++) if (jsyms[x] !== id) return false;
+      return true;
+    };
+    if (allMatch(SYMBOLS.SISTERS.id)) { jpWin = SEEDS.GRAND || 2000; jpType = 'GRAND'; break; }
+    if (!jpType && allMatch(SYMBOLS.JOSIE.id))  { jpWin = SEEDS.MINOR || 60;   jpType = 'MINOR'; }
+    if (!jpType && allMatch(SYMBOLS.SASHA.id))  { jpWin = SEEDS.MINI  || 20;   jpType = 'MINI';  }
   }
 
-  process.stdout.write('\r' + ' '.repeat(60) + '\r'); // clear progress line
+  // ── Trigger flags ─────────────────────────────────────────────────────────
+  // H&S: 6+ gold coins visible in grid
+  var trigHS = coins >= 6;
 
-  const elapsed   = ((Date.now() - start) / 1000).toFixed(1);
-  const baseRTP   = (baseWon / totalWagered * 100);
+  // P&C: 5-oak Lipstick on PAYLINE 0 (center row [1,1,1,1,1]) — matches game.js line 192
+  var pl0    = PAYLINES[0]; // [1,1,1,1,1]
+  var trigPC = true;
+  for (var pcc = 0; pcc < 5; pcc++) {
+    if (g[pcc][pl0[pcc]] !== BONUS_PC_ID) { trigPC = false; break; }
+  }
 
-  // Estimated bonus RTP contributions
-  const avgHsWin  = estimateHoldSpinWin();
-  const avgRsWin  = estimateRedSpinWin();
-  const avgPcWin  = estimatePickChooseWin();
+  // BONUS: all 5 LETTER_IDs on BOTTOM ROW (row 2) of their respective columns
+  var trigBonus = true;
+  for (var bc = 0; bc < 5; bc++) {
+    if (g[bc][2] !== LETTER_IDS[bc]) { trigBonus = false; break; }
+  }
 
-  const hsTotal   = holdSpinTriggers   * avgHsWin;
-  const rsTotal   = redSpinTriggers    * avgRsWin;
-  const pcTotal   = pickChooseTriggers * avgPcWin;
+  // RS: only on a winning spin (win > 0), gated by frequency
+  // H&S takes priority — RS does not fire when H&S triggered
+  var trigRS = !trigHS && win > 0 && rs() < RED_SPIN_FREQUENCY_DEFAULT;
 
-  const hsRTP     = hsTotal / totalWagered * 100;
-  const rsRTP     = rsTotal / totalWagered * 100;
-  const pcRTP     = pcTotal / totalWagered * 100;
-  const totalRTP  = baseRTP + hsRTP + rsRTP + pcRTP;
-
-  // ── REPORT ─────────────────────────────────────────────────────────────────
-  const hr = '─'.repeat(58);
-  const W = (n, w=10) => String(n).padStart(w);
-  const P = (n, d=2) => (n.toFixed(d) + '%').padStart(10);
-  const D = (n) => ('$' + n.toFixed(2)).padStart(10);
-  const freq = (n) => n > 0 ? `1 in ${Math.round(TOTAL_SPINS / n).toLocaleString()}` : 'never';
-
-  console.log('\n');
-  console.log('╔══════════════════════════════════════════════════════════╗');
-  console.log('║       TURRELLE SISTERS BIG MUNNY — MONTE CARLO          ║');
-  console.log('╚══════════════════════════════════════════════════════════╝');
-
-  console.log(`\n${'Spins:'.padEnd(22)}${TOTAL_SPINS.toLocaleString().padStart(18)}`);
-  console.log(`${'Active Lines:'.padEnd(22)}${String(ACTIVE_LINES).padStart(18)}`);
-  console.log(`${'Credits / Line:'.padEnd(22)}${String(CREDITS_PER_LINE).padStart(18)}`);
-  console.log(`${'Denomination:'.padEnd(22)}${('$' + DENOM.toFixed(2)).padStart(18)}`);
-  console.log(`${'Bet / Spin:'.padEnd(22)}${D(TOTAL_BET).padStart(18)}`);
-  console.log(`${'Total Wagered:'.padEnd(22)}${D(totalWagered).padStart(18)}`);
-  console.log(`${'Elapsed:'.padEnd(22)}${(elapsed + 's').padStart(18)}`);
-
-  console.log(`\n${hr}`);
-  console.log('  BASE GAME (Fully Simulated)');
-  console.log(hr);
-  console.log(`${'Total Won:'.padEnd(30)}${D(baseWon).padStart(14)}`);
-  console.log(`${'Base RTP:'.padEnd(30)}${P(baseRTP).padStart(14)}`);
-  console.log(`${'Hit Frequency:'.padEnd(30)}${(hitCount / TOTAL_SPINS * 100).toFixed(2).padStart(13)}%`);
-  console.log(`${'  (1 in)'.padEnd(30)}${freq(hitCount).padStart(14)}`);
-  console.log(`${'Cherry Hits:'.padEnd(30)}${(cherryHits / TOTAL_SPINS * 100).toFixed(2).padStart(13)}%  ${freq(cherryHits)}`);
-  console.log(`${'Mixed Bar Hits:'.padEnd(30)}${(mixedBarHits / TOTAL_SPINS * 100).toFixed(2).padStart(13)}%  ${freq(mixedBarHits)}`);
-
-  console.log(`\n${hr}`);
-  console.log('  BONUS TRIGGERS & ESTIMATED RTP CONTRIBUTION');
-  console.log(hr);
-
-  const bonusFmt = (label, count, avgWin, estRTP) => {
-    const f = freq(count);
-    console.log(`${label.padEnd(22)}${String(count.toLocaleString()).padStart(10)}  ${f.padStart(14)}  est +${estRTP.toFixed(2)}%`);
+  return {
+    win: win, coins: coins,
+    trigHS: trigHS, trigRS: trigRS,
+    trigPC: trigPC, trigBonus: trigBonus,
+    jpWin: jpWin, jpType: jpType,
   };
-
-  bonusFmt('Hold & Spin:',    holdSpinTriggers,    avgHsWin, hsRTP);
-  console.log(`${'  avg win / trigger:'.padEnd(22)}${D(avgHsWin).padStart(26)}`);
-
-  bonusFmt('Red Spin:',       redSpinTriggers,     avgRsWin, rsRTP);
-  const avgRedSpins = RED_SPIN_CONTINUANCE_DEFAULT / (1 - RED_SPIN_CONTINUANCE_DEFAULT);
-  console.log(`${'  avg spins / trigger:'.padEnd(22)}${avgRedSpins.toFixed(1).padStart(26)}`);
-  console.log(`${'  (continuance rate:'.padEnd(22)}${(RED_SPIN_CONTINUANCE_DEFAULT * 100).toFixed(0).padStart(24)}%)`);
-
-  bonusFmt('Pick & Choose:',  pickChooseTriggers,  avgPcWin, pcRTP);
-  console.log(`${'  avg win / trigger:'.padEnd(22)}${D(avgPcWin).padStart(26)}`);
-
-  bonusFmt('BONUS Feature:',  bonusFeatureTriggers, 0, 0);
-
-  console.log('\n  Bonus Letter Partial Pays:');
-  [1,2,3,4].forEach(n => {
-    if (letterHits[n] > 0) {
-      const pay = (BONUS_LETTER_PAYS[n] || 0) * BET_PER_LINE;
-      console.log(`    ${n}-letter:  ${letterHits[n].toLocaleString().padStart(8)} hits  ${freq(letterHits[n]).padStart(16)}  (${D(pay)} each)`);
-    }
-  });
-  if (letterHits[5] > 0) {
-    console.log(`    5-letter:  ${letterHits[5].toLocaleString().padStart(8)} hits  ${freq(letterHits[5]).padStart(16)}  → triggers BONUS feature`);
-  }
-
-  console.log(`\n${hr}`);
-  console.log('  JACKPOT ODDS (Theoretical)');
-  console.log(hr);
-  ['MINI','MINOR','MAJOR','GRAND'].forEach(tier => {
-    const odds  = JACKPOT_ODDS[tier];
-    const seed  = JACKPOT_SEEDS[tier];
-    const label = `${tier} ($${seed.toLocaleString()}):`;
-    const oddsStr = `1 in ${Math.round(1/odds).toLocaleString()}`;
-    console.log(`  ${label.padEnd(24)}${oddsStr.padStart(18)}`);
-  });
-
-  console.log(`\n${hr}`);
-  console.log('  SYMBOL FREQUENCY — Center Row (Reel × Center Position)');
-  console.log(hr);
-  const SYM_NAMES = {
-    0:'Sisters', 1:'Josie', 2:'Sasha', 3:'Seven', 4:'3-Bar',
-    5:'2-Bar', 6:'1-Bar', 7:'Cherry', 8:'Lipstick', 9:'GoldCoin',
-    10:'Ltr-B', 11:'Ltr-O', 12:'Ltr-N', 13:'Ltr-U', 14:'Ltr-S',
-    15:'Diamond', 16:'DJMaxine', 17:'StrayPup',
-  };
-  console.log(`${'Symbol'.padEnd(12)} ${'R1'.padStart(7)} ${'R2'.padStart(7)} ${'R3'.padStart(7)} ${'R4'.padStart(7)} ${'R5'.padStart(7)}  ${'Equal?'}`);
-  console.log('  ' + '─'.repeat(56));
-  for (let id = 0; id < 18; id++) {
-    if (symFreq[id].every(c => c === 0)) continue;
-    const pcts = symFreq[id].map(c => (c / TOTAL_SPINS * 100).toFixed(1) + '%');
-    // Check if equal (within 0.5% tolerance)
-    const vals  = symFreq[id];
-    const mean  = vals.reduce((a,b)=>a+b,0)/5;
-    const equal = vals.every(v => Math.abs(v - mean) / (mean||1) < 0.05) ? '✓' : '≠';
-    const name  = (SYM_NAMES[id] || `id:${id}`).padEnd(12);
-    console.log(`${name} ${pcts.map(p => p.padStart(7)).join(' ')}  ${equal}`);
-  }
-
-  console.log(`\n${hr}`);
-  console.log('  ESTIMATED TOTAL RTP BREAKDOWN');
-  console.log(hr);
-  const rtpLine = (label, rtp) => console.log(`  ${label.padEnd(28)}${(rtp.toFixed(2) + '%').padStart(12)}`);
-  rtpLine('Base Game (simulated):',  baseRTP);
-  rtpLine('Hold & Spin (estimated):', hsRTP);
-  rtpLine('Red Spin (estimated):',    rsRTP);
-  rtpLine('Pick & Choose (estimated):', pcRTP);
-  console.log('  ' + '─'.repeat(40));
-  console.log(`  ${'TOTAL ESTIMATED RTP:'.padEnd(28)}${(totalRTP.toFixed(2) + '%').padStart(12)}`);
-  console.log(`\n  ⚠  Red Spin avg win is estimated (placeholder 0.85× bet/spin).`);
-  console.log(`     Update EST_RED_SPIN_SPIN_RTP in this file after Red Spin analysis.\n`);
 }
 
-// ── ENTRY POINT ───────────────────────────────────────────────────────────────
-console.log(`\nStarting Monte Carlo: ${TOTAL_SPINS.toLocaleString()} spins × $${TOTAL_BET.toFixed(2)}/spin...`);
-runSimulation();
+// ── H&S simulator ────────────────────────────────────────────────────────────
+function simHS(initCoins) {
+  var board = [];
+  for (var bi = 0; bi < 15; bi++) board.push(false);
+  var occ = 0, placed = 0;
+
+  // Place trigger coins
+  while (placed < Math.min(initCoins, 15)) {
+    var c = Math.floor(rs() * 15);
+    if (!board[c]) { board[c] = true; occ++; placed++; }
+  }
+
+  // Respin loop
+  var resp = 3;
+  while (resp > 0 && occ < 15) {
+    var landed = false;
+    for (var i = 0; i < 15; i++) {
+      if (!board[i] && rs() < HOLD_SPIN_LAND_PROBABILITY) {
+        board[i] = true; occ++; landed = true;
+      }
+    }
+    if (landed) resp = 3; else resp--;
+  }
+
+  // Payout — cash tiers + jackpot tiers
+  var cap = TOTAL < 1 ? 3 : TOTAL <= 5 ? 25 : Infinity;
+  var win = 0;
+  for (var ci = 0; ci < occ; ci++) {
+    var jr = rs(), cjp = 0, isJp = false;
+    for (var jt = 0; jt < HOLD_SPIN_JACKPOT_TIERS.length; jt++) {
+      cjp += HOLD_SPIN_JACKPOT_TIERS[jt].weight;
+      if (jr < cjp) {
+        win  += SEEDS[HOLD_SPIN_JACKPOT_TIERS[jt].level] || 0;
+        isJp  = true; break;
+      }
+    }
+    if (!isJp) {
+      var r2 = rs(), cum = 0;
+      for (var ct = 0; ct < HOLD_SPIN_CASH_TIERS.length; ct++) {
+        cum += HOLD_SPIN_CASH_TIERS[ct].weight;
+        if (r2 < cum) {
+          var f = HOLD_SPIN_CASH_TIERS[ct].minFrac + rs() * (HOLD_SPIN_CASH_TIERS[ct].maxFrac - HOLD_SPIN_CASH_TIERS[ct].minFrac);
+          win += Math.round(Math.min(f * TOTAL, cap));
+          break;
+        }
+      }
+    }
+  }
+  return { win: win, coins: occ };
+}
+
+// ── Red Spin simulator ───────────────────────────────────────────────────────
+// Tier config — owner confirmed 2026-05-18
+var TIER_MULT = [
+  { min: 1,    max: 10  },   // T1 Small
+  { min: 10,   max: 35  },   // T2 Medium
+  { min: 35,   max: 200 },   // T3 Large
+  { min: null, max: null },  // T4 Sisters Grand
+];
+var JP_ODDS  = 0.02;
+var JP_POOLS = [
+  ['MINI'],
+  ['MINOR','MINI','MINI','MINI','MINI','MINI','MINI','MINI','MINI','MINI'],
+  ['MAJOR','MINOR','MINOR','MINOR','MINI','MINI','MINI','MINI','MINI','MINI'],
+  ['GRAND'],
+];
+var ADV_PROB  = 0.20;
+var CONT_PROB = RED_SPIN_CONTINUANCE_DEFAULT; // 60% — owner confirmed 2026-05-18
+
+// Per-run counters (reset each sim run)
+var jpByTier   = [0, 0, 0, 0];
+var jpTypeHits = { MINI: 0, MINOR: 0, MAJOR: 0, GRAND: 0 };
+var tierSpins  = [0, 0, 0, 0];
+var tierSeqs   = [0, 0, 0, 0];
+var rsSpinTotal = 0, rsSeqCount = 0;
+
+function simRS(prevWin) {
+  rsSeqCount++;
+  var total = 0;
+  var last  = Math.max(prevWin || 0, TOTAL);
+  var tier  = 0, firstInTier = true, jpFired = false, spins = 0;
+  var lastStops = [], lastPlKey = '';
+  tierSeqs[0]++;
+
+  while (true) {
+    spins++; rsSpinTotal++;
+    tierSpins[tier]++;
+
+    // T4: Sisters Grand — always pays, always ends
+    if (tier === 3) {
+      var gv = SEEDS.GRAND || 10000;
+      total += gv;
+      jpByTier[3]++; jpTypeHits.GRAND++;
+      break;
+    }
+
+    var tMin    = TIER_MULT[tier].min * TOTAL;
+    var tMax    = TIER_MULT[tier].max * TOTAL;
+    var spinWin = 0;
+
+    // JP roll — once per tier entry
+    if (!jpFired && rs() < JP_ODDS) {
+      var pool   = JP_POOLS[tier];
+      var jpType = pool[Math.floor(rs() * pool.length)];
+      spinWin    = SEEDS[jpType] || 0;
+      jpFired    = true;
+      jpByTier[tier]++;
+      jpTypeHits[jpType] = (jpTypeHits[jpType] || 0) + 1;
+      lastStops = []; lastPlKey = '';
+
+    } else {
+      // Find a valid spin: win in tier range, escalating from last
+      var found = false, att = 0;
+      var curStops = [], curPlKey = '';
+      while (!found && att < 800) {
+        curStops = randStops();
+        var g2   = grid(curStops);
+        var r2   = evalSpin(g2);
+        // Build payline key from active winning lines
+        var winLines = [];
+        for (var wli = 0; wli < LINES; wli++) {
+          var wpl   = PAYLINES[wli];
+          var wsyms = [];
+          for (var wci = 0; wci < 5; wci++) wsyms.push(g2[wci][wpl[wci]]);
+          if (evalLine(wsyms) > 0) winLines.push(wli);
+        }
+        curPlKey = winLines.sort().join(',');
+        var stopsMatch = lastStops.length === 5 && curStops.every(function(s, i) { return s === lastStops[i]; });
+        var plMatch    = curPlKey !== '' && curPlKey === lastPlKey;
+        if (r2.win >= last && r2.win >= tMin && r2.win <= tMax && (!stopsMatch || !plMatch)) {
+          spinWin = r2.win; found = true;
+        }
+        att++;
+      }
+      if (!found) {
+        // Fallback: T1 advances to T2. T2/T3 end.
+        if (tier === 0) { tier++; firstInTier = true; jpFired = false; tierSeqs[tier]++; continue; }
+        else break;
+      }
+      lastStops = curStops; lastPlKey = curPlKey;
+    }
+
+    total += spinWin;
+    last   = spinWin;
+
+    // Tier advance if JP or win exceeded ceiling
+    if (spinWin > tMax && tier < 3) {
+      tier++; firstInTier = true; jpFired = false; tierSeqs[tier]++;
+      lastStops = []; lastPlKey = '';
+      continue;
+    }
+
+    // Continuance / advancement roll
+    if (firstInTier) {
+      firstInTier = false;
+    } else {
+      if (rs() >= CONT_PROB) {
+        if (tier < 3 && rs() < ADV_PROB) {
+          tier++; firstInTier = true; jpFired = false; tierSeqs[tier]++;
+          lastStops = []; lastPlKey = '';
+        } else { break; }
+      }
+    }
+
+    if (spins >= 100) break; // safety ceiling
+  }
+  return { win: total, spins: spins };
+}
+
+// ── Pick & Choose simulator ───────────────────────────────────────────────────
+function simPC() {
+  var r2 = rs(), cum = 0, prizeType = 'cash';
+  for (var pi = 0; pi < PICK_CHOOSE_PRIZES.length; pi++) {
+    cum += PICK_CHOOSE_PRIZES[pi].weight;
+    if (r2 < cum) { prizeType = PICK_CHOOSE_PRIZES[pi].type; break; }
+  }
+  if (prizeType === 'cash') {
+    var ti = Math.floor(rs() * PICK_CHOOSE_CASH_TIERS.length);
+    var t  = PICK_CHOOSE_CASH_TIERS[ti];
+    return Math.round(TOTAL * (t.minMult + rs() * (t.maxMult - t.minMult)));
+  }
+  if (prizeType === 'hold_spin') return simHS(6).win;
+  if (prizeType === 'red_spin')  return simRS(TOTAL).win;
+  return SEEDS[(prizeType || 'MINI').toUpperCase()] || SEEDS.MINI || 20;
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+var baseW = 0, hsW = 0, rsW = 0, pcW = 0, bonW = 0, jpW = 0;
+var hsTrig = 0, rsTrig = 0, pcTrig = 0, bonTrig = 0, jpTrig = 0;
+var wagered = SPINS * TOTAL;
+
+process.stderr.write('Monte Carlo: ' + SPINS.toLocaleString() + ' spins @ $' + TOTAL.toFixed(2) + '/spin (' + DENOM + ' denom)...\n');
+
+for (var s = 0; s < SPINS; s++) {
+  if (s % 100000 === 0) process.stderr.write('\r  ' + (s / SPINS * 100).toFixed(0) + '%...');
+
+  var g   = grid(randStops());
+  var res = evalSpin(g);
+
+  baseW += res.win;
+  if (res.jpWin) { jpTrig++; jpW += res.jpWin; }
+
+  // Priority order matching game.js: H&S > P&C > RS
+  if (res.trigHS) {
+    hsTrig++;
+    var hr = simHS(res.coins);
+    hsW += hr.win;
+  } else if (res.trigPC) {
+    pcTrig++; pcW += simPC();
+  } else if (res.trigRS) {
+    // trigRS already excludes H&S wins (gated in evalSpin)
+    rsTrig++;
+    var rr = simRS(res.win);
+    rsW += rr.win;
+  }
+
+  // BONUS orb — independent of above (bottom row trigger)
+  if (res.trigBonus) { bonTrig++; bonW += simPC(); }
+}
+process.stderr.write('\n');
+
+// ── Output ────────────────────────────────────────────────────────────────────
+var totalPaid = baseW + hsW + rsW + pcW + bonW + jpW;
+function P(v)  { return (v / wagered * 100).toFixed(2) + '%'; }
+function fmt(n) { return '$' + n.toFixed(2); }
+function rate(t) { return t > 0 ? '1 in ' + Math.round(SPINS / t) : 'never'; }
+
+console.log('\n╔══════════════════════════════════════════════════════╗');
+console.log('║  MONTE CARLO RESULTS                                 ║');
+console.log('╚══════════════════════════════════════════════════════╝');
+console.log('Denom: $' + DENOM + ' | ' + CPL + 'cr/line | ' + LINES + ' lines | Bet: ' + fmt(TOTAL) + '/spin');
+console.log('Spins: ' + SPINS.toLocaleString() + ' | Wagered: ' + fmt(wagered));
+console.log('RS_FREQ=' + RED_SPIN_FREQUENCY_DEFAULT + ' | RS_CONT=' + RED_SPIN_CONTINUANCE_DEFAULT + ' | HS_LAND=' + HOLD_SPIN_LAND_PROBABILITY);
+console.log('─────────────────────────────────────────────────────────');
+console.log('BASE GAME    ' + fmt(baseW).padStart(14) + '  RTP: ' + P(baseW));
+console.log('H&S BONUS    ' + fmt(hsW).padStart(14) + '  RTP: ' + P(hsW) +
+            '  trig: ' + hsTrig.toLocaleString() + ' (' + rate(hsTrig) + ')' +
+            '  avg: ' + fmt(hsTrig ? hsW / hsTrig : 0));
+console.log('RED SPIN     ' + fmt(rsW).padStart(14) + '  RTP: ' + P(rsW) +
+            '  trig: ' + rsTrig.toLocaleString() + ' (' + rate(rsTrig) + ')' +
+            '  avg: ' + fmt(rsTrig ? rsW / rsTrig : 0));
+console.log('  avg spins/seq: ' + (rsTrig ? rsSpinTotal / rsTrig : 0).toFixed(2));
+console.log('  Tier sequences:');
+var tNames = ['T1 Small','T2 Medium','T3 Large','T4 Sisters'];
+for (var ti = 0; ti < 4; ti++) {
+  var pct = rsTrig ? (tierSeqs[ti] / rsTrig * 100).toFixed(1) + '%' : '0%';
+  console.log('    ' + tNames[ti] + ': ' + tierSeqs[ti].toLocaleString() + ' (' + pct + ')  ' + tierSpins[ti].toLocaleString() + ' spins');
+}
+console.log('  JP hits: MINI=' + jpTypeHits.MINI + ' MINOR=' + jpTypeHits.MINOR +
+            ' MAJOR=' + jpTypeHits.MAJOR + ' GRAND=' + jpTypeHits.GRAND);
+console.log('PICK & CHOOSE' + fmt(pcW).padStart(14) + '  RTP: ' + P(pcW) +
+            '  trig: ' + pcTrig.toLocaleString() + ' (' + rate(pcTrig) + ')' +
+            '  avg: ' + fmt(pcTrig ? pcW / pcTrig : 0));
+console.log('BONUS ORB    ' + fmt(bonW).padStart(14) + '  RTP: ' + P(bonW) +
+            '  trig: ' + bonTrig.toLocaleString() + ' (' + rate(bonTrig) + ')');
+console.log('BASE JPs     ' + fmt(jpW).padStart(14) + '  RTP: ' + P(jpW) +
+            '  hits: ' + jpTrig.toLocaleString() + ' (' + rate(jpTrig) + ')');
+console.log('─────────────────────────────────────────────────────────');
+console.log('TOTAL        ' + fmt(totalPaid).padStart(14) + '  RTP: ' + P(totalPaid));
+console.log('TARGET: 94% | GAP: ' + ((totalPaid / wagered * 100) - 94).toFixed(2) + '%');

@@ -114,165 +114,246 @@ var Operator = (function() {
     var ctxKeys    = ['bonus','base','any'];
     var ctxLabels  = {'bonus':'🎰 BONUS','base':'🎡 BASE','any':'⚡ ANY'};
 
+    // Detect any armed force triggers for banner
+    var armedList = [];
+    if (op.forceRedSpin)      armedList.push('Red Spin');
+    if (op.forceFreeSpins)    armedList.push('P&C');
+    if (op.forceBonusGame)    armedList.push('Hold & Spin');
+    if (op.forceBonusFeature) armedList.push('BONUS Letters');
+    if (op.forceJackpot && op.forceJackpot !== 'none') armedList.push(op.forceJackpot + ' Jackpot');
+
+    // Denom + bet for context
+    var denomVal   = (typeof GameState.denom !== 'undefined') ? GameState.denom : 0.01;
+    var linesVal   = (typeof DEFAULT_LINES !== 'undefined') ? DEFAULT_LINES : 20;
+    var cplVal     = (typeof GameState.creditsPerLine !== 'undefined') ? GameState.creditsPerLine : 1;
+    var totalBetVal = denomVal * cplVal * linesVal;
+
     // ── Build HTML using string concatenation (ES5 — no template literals) ──
     var h = '';
 
-    // Header
+    // Header — includes denom/bet context
     h += '<div id="op-header">';
     h += '<div id="op-title">⚙️ OPERATOR PANEL</div>';
+    h += '<div style="font-size:10px;color:rgba(255,220,80,0.7);margin-top:2px">';
+    h += Math.round(denomVal * 100) + '¢ denom · ' + cplVal + 'cr/line · ' + linesVal + 'L · Bet $' + totalBetVal.toFixed(2);
+    h += '</div>';
     h += '<button id="op-close">✕ CLOSE</button>';
     h += '</div>';
 
+    // Armed banner — always visible if anything is armed
+    if (armedList.length > 0) {
+      h += '<div id="op-armed-banner">⚡ ARMED: ' + armedList.join(' + ') + '</div>';
+      h += '<button class="op-btn danger" style="width:calc(100% - 20px);margin:0 10px 8px;font-size:11px" onclick="Operator.disarmAll()">🚫 DISARM ALL</button>';
+    }
+
+    // ── Helper: collapsible section header (var expressions — safe in all modes)
+    var _sec = function(key, icon, title) {
+      var collapsed = op._collapsed && op._collapsed[key];
+      var arr = collapsed ? '▶' : '▼';
+      return '<div class="op-section' + (collapsed ? ' collapsed' : '') + '" id="op-sec-' + key + '">'
+           + '<div class="op-section-title" onclick="Operator.toggleSection(\'' + key + '\')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">'
+           + '<span>' + icon + ' ' + title + '</span><span style="font-size:10px;opacity:0.6">' + arr + '</span>'
+           + '</div>'
+           + (collapsed ? '' : '<!-- body -->');
+    };
+    var _secEnd = function(key) {
+      var collapsed = op._collapsed && op._collapsed[key];
+      return collapsed ? '</div>' : '</div></div>';
+    };
+
     // RTP & Hold
-    h += '<div class="op-section">';
-    h += '<div class="op-section-title">📊 RTP &amp; HOLD</div>';
-    h += '<div class="op-row"><span class="op-label">Target RTP %</span>';
-    h += '<input class="op-input" id="op-rtp" type="number" min="85" max="99" step="0.5" value="' + op.targetRTP.toFixed(1) + '"></div>';
-    h += '<div class="op-row"><span class="op-label">Hold %</span>';
-    h += '<input class="op-input" id="op-hold" type="number" min="1" max="15" step="0.5" value="' + (100 - op.targetRTP).toFixed(1) + '"></div>';
-    h += '<div style="text-align:right;margin-top:6px"><button class="op-btn" onclick="Operator.applyRTP()">APPLY</button></div>';
-    h += '<div class="op-rtp-stats" style="margin-top:10px">';
-    h += 'Target RTP: <span>' + op.targetRTP.toFixed(1) + '%</span><br>';
-    h += 'Theoretical RTP: <span id="op-theoretical-rtp">' + theoRTP + '</span><br>';
-    h += 'Live RTP: <span class="' + rtpClass + '">' + actualRTP.toFixed(2) + '%</span><br>';
-    h += 'Total Wagered: <span>$' + st.totalWagered.toFixed(2) + '</span><br>';
-    h += 'Total Paid Out: <span>$' + st.totalWon.toFixed(2) + '</span><br>';
-    h += 'Total Spins: <span>' + st.totalSpins + '</span><br>';
-    h += 'Session: <span>' + getSessionDuration() + '</span><br>';
-    h += 'Biggest Win: <span>$' + st.biggestWin.toFixed(2) + '</span>';
-    h += '</div></div>';
+    h += _sec('rtp', '📊', 'RTP &amp; HOLD');
+    if (!(op._collapsed && op._collapsed['rtp'])) {
+      h += '<div class="op-row"><span class="op-label">Target RTP %</span>';
+      h += '<input class="op-input" id="op-rtp" type="number" min="85" max="99" step="0.5" value="' + op.targetRTP.toFixed(1) + '"></div>';
+      h += '<div class="op-row"><span class="op-label">Hold %</span>';
+      h += '<input class="op-input" id="op-hold" type="number" min="1" max="15" step="0.5" value="' + (100 - op.targetRTP).toFixed(1) + '"></div>';
+      h += '<div style="text-align:right;margin-top:6px"><button class="op-btn" onclick="Operator.applyRTP()">APPLY</button></div>';
+      h += '<div class="op-rtp-stats" style="margin-top:10px">';
+      h += 'Target RTP: <span>' + op.targetRTP.toFixed(1) + '%</span><br>';
+      h += 'Theoretical RTP: <span id="op-theoretical-rtp">' + theoRTP + '</span><br>';
+      h += 'Live RTP: <span class="' + rtpClass + '">' + actualRTP.toFixed(2) + '%</span><br>';
+      h += 'Total Wagered: <span>$' + st.totalWagered.toFixed(2) + '</span><br>';
+      h += 'Total Paid Out: <span>$' + st.totalWon.toFixed(2) + '</span><br>';
+      h += 'Total Spins: <span>' + st.totalSpins + '</span><br>';
+      h += 'Session: <span>' + getSessionDuration() + '</span><br>';
+      h += 'Biggest Win: <span>$' + st.biggestWin.toFixed(2) + '</span>';
+      h += '</div>';
+    }
+    h += _secEnd('rtp');
 
     // Bonus Controls
-    h += '<div class="op-section">';
-    h += '<div class="op-section-title">🎰 BONUS CONTROLS</div>';
-    h += '<div class="op-row"><span class="op-label">Bonus Freq Multiplier</span>';
-    h += '<input class="op-input" id="op-bfreq" type="number" min="0.5" max="5" step="0.1" value="' + op.bonusFrequencyMultiplier.toFixed(1) + '"></div>';
-    h += '<div class="op-row"><span class="op-label">Red Spin Continuance % <span style="color:#aaa;font-size:9px">(65=default)</span></span>';
-    h += '<div style="display:flex;gap:4px;align-items:center"><input class="op-input" id="op-rscont" type="number" min="10" max="99" step="1" value="' + (op.redSpinContinuance*100).toFixed(0) + '" style="width:54px"><button class="op-btn" style="font-size:9px;padding:3px 6px" onclick="Operator.resetRedSpinContinuance()">RESET</button></div></div>';
-    h += '<div class="op-row"><span class="op-label">Disable P&amp;C in Red Spin</span><button class="op-btn force-btn ' + (op.disablePickChooseInRedSpin?'armed':'') + '" data-fkey="disablePickChooseInRedSpin" onclick="Operator.toggleForce(this.dataset.fkey)">' + (op.disablePickChooseInRedSpin?'OFF':'ON') + '</button></div>';
-    h += '<div class="op-row"><span class="op-label">Disable H&amp;S in Red Spin</span><button class="op-btn force-btn ' + (op.disableHoldSpinInRedSpin?'armed':'') + '" data-fkey="disableHoldSpinInRedSpin" onclick="Operator.toggleForce(this.dataset.fkey)">' + (op.disableHoldSpinInRedSpin?'OFF':'ON') + '</button></div>';
-    h += '<div class="op-row"><span class="op-label">Jackpot Contribution %</span>';
-    h += '<input class="op-input" id="op-jpct" type="number" min="1" max="10" step="0.5" value="' + (op.jackpotContribution*100).toFixed(1) + '"></div>';
-    h += '<div class="op-row"><span class="op-label">Max Win Per Spin ($0=off)</span>';
-    h += '<input class="op-input" id="op-maxwin" type="number" min="0" step="10" value="' + op.maxWinPerSpin + '"></div>';
-    h += '<div style="text-align:right;margin-top:6px"><button class="op-btn" onclick="Operator.applyBonusSettings()">APPLY</button></div>';
-    h += '</div>';
+    h += _sec('bonus', '🎰', 'BONUS CONTROLS');
+    if (!(op._collapsed && op._collapsed['bonus'])) {
+      h += '<div class="op-row"><span class="op-label">Bonus Freq Multiplier</span>';
+      h += '<input class="op-input" id="op-bfreq" type="number" min="0.5" max="5" step="0.1" value="' + op.bonusFrequencyMultiplier.toFixed(1) + '"></div>';
+      h += '<div class="op-row"><span class="op-label">Red Spin Continuance % <span style="color:#aaa;font-size:9px">(70=default)</span></span>';
+      h += '<div style="display:flex;gap:4px;align-items:center"><input class="op-input" id="op-rscont" type="number" min="10" max="99" step="1" value="' + (op.redSpinContinuance*100).toFixed(0) + '" style="width:54px"><button class="op-btn" style="font-size:9px;padding:3px 6px" onclick="Operator.resetRedSpinContinuance()">RESET</button></div></div>';
+      h += '<div class="op-row"><span class="op-label">Disable P&amp;C in Red Spin</span><button class="op-btn force-btn ' + (op.disablePickChooseInRedSpin?'armed':'') + '" data-fkey="disablePickChooseInRedSpin" onclick="Operator.toggleForce(this.dataset.fkey)">' + (op.disablePickChooseInRedSpin?'OFF':'ON') + '</button></div>';
+      h += '<div class="op-row"><span class="op-label">Disable H&amp;S in Red Spin</span><button class="op-btn force-btn ' + (op.disableHoldSpinInRedSpin?'armed':'') + '" data-fkey="disableHoldSpinInRedSpin" onclick="Operator.toggleForce(this.dataset.fkey)">' + (op.disableHoldSpinInRedSpin?'OFF':'ON') + '</button></div>';
+      h += '<div class="op-row"><span class="op-label">Jackpot Contribution %</span>';
+      h += '<input class="op-input" id="op-jpct" type="number" min="1" max="10" step="0.5" value="' + (op.jackpotContribution*100).toFixed(1) + '"></div>';
+      h += '<div class="op-row"><span class="op-label">Max Win Per Spin ($0=off)</span>';
+      h += '<input class="op-input" id="op-maxwin" type="number" min="0" step="10" value="' + op.maxWinPerSpin + '"></div>';
+      h += '<div style="text-align:right;margin-top:6px"><button class="op-btn" onclick="Operator.applyBonusSettings()">APPLY</button></div>';
+    }
+    h += _secEnd('bonus');
 
     // Force Triggers
-    h += '<div class="op-section">';
-    h += '<div class="op-section-title">⚡ FORCE TRIGGERS (Next Spin)</div>';
-    var forceItems = [
-      ['forceRedSpin',    'Force Red Spin'],
-      ['forceFreeSpins',  'Force Scatter/Pick'],
-      ['forceBonusGame',  'Force Hold &amp; Spin'],
-      ['forceBonusFeature','Force BONUS Letters'],
-    ];
-    for (var fi = 0; fi < forceItems.length; fi++) {
-      var fkey = forceItems[fi][0];
-      var flbl = forceItems[fi][1];
-      var farmed = op[fkey] ? 'armed' : '';
-      var ftxt = op[fkey] ? '✅ ARMED' : 'ARM';
-      h += '<div class="op-row"><span class="op-label">' + flbl + '</span>';
-      h += '<button class="op-btn force-btn ' + farmed + '" data-fkey="' + fkey + '" onclick="Operator.toggleForce(this.dataset.fkey)">' + ftxt + '</button></div>';
+    h += _sec('force', '⚡', 'FORCE TRIGGERS (Next Spin)');
+    if (!(op._collapsed && op._collapsed['force'])) {
+      var forceItems = [
+        ['forceRedSpin',     'Force Red Spin'],
+        ['forceFreeSpins',   'Force Pick &amp; Choose'],
+        ['forceBonusGame',   'Force Hold &amp; Spin'],
+        ['forceBonusFeature','Force BONUS Letters'],
+      ];
+      for (var fi = 0; fi < forceItems.length; fi++) {
+        var fkey = forceItems[fi][0];
+        var flbl = forceItems[fi][1];
+        var farmed = op[fkey] ? 'armed' : '';
+        var ftxt = op[fkey] ? '✅ ARMED' : 'ARM';
+        h += '<div class="op-row"><span class="op-label">' + flbl + '</span>';
+        h += '<button class="op-btn force-btn ' + farmed + '" data-fkey="' + fkey + '" onclick="Operator.toggleForce(this.dataset.fkey)">' + ftxt + '</button></div>';
+      }
+      // Jackpot force
+      h += '<div class="op-row" style="flex-direction:column;align-items:flex-start;gap:6px">';
+      h += '<span class="op-label">⚡ Force Jackpot Trigger</span>';
+      h += '<div style="display:flex;gap:6px;flex-wrap:wrap;width:100%">';
+      for (var ji = 0; ji < forceKeys.length; ji++) {
+        var jk = forceKeys[ji];
+        var jarmed = op.forceJackpot === jk ? ' armed' : '';
+        var jtxt = (op.forceJackpot === jk ? '✅ ' : '') + jk;
+        h += '<button class="op-btn force-btn' + jarmed + '" style="flex:1;min-width:56px" data-jptype="' + jk + '" onclick="Operator.selectJackpotType(this.dataset.jptype)">' + jtxt + '</button>';
+      }
+      h += '<button class="op-btn danger" style="flex:1;min-width:56px" data-jptype="none" onclick="Operator.selectJackpotType(this.dataset.jptype)">CLEAR</button>';
+      h += '</div>';
+      if (op.forceJackpot !== 'none') {
+        h += '<div style="display:flex;gap:4px;width:100%;margin-top:2px">';
+        for (var ci = 0; ci < ctxKeys.length; ci++) {
+          var ck = ctxKeys[ci];
+          var carmed = op.forceJackpotContext === ck ? ' armed' : '';
+          var ctxt = (op.forceJackpotContext === ck ? '✅ ' : '') + ctxLabels[ck];
+          h += '<button class="op-btn force-btn' + carmed + '" style="flex:1;font-size:9px" data-ctx="' + ck + '" onclick="Operator.setJackpotContext(this.dataset.ctx)">' + ctxt + '</button>';
+        }
+        h += '</div>';
+        var armCtx = op.forceJackpotContext === 'base' ? '(BASE REELS)' : op.forceJackpotContext === 'any' ? '(ANY CONTEXT)' : '(NEXT BONUS)';
+        h += '<button class="op-btn" style="width:100%;background:linear-gradient(135deg,#1a3a1a,#0d1f0d);border-color:#40cc40;color:#80ff80" onclick="Operator.armJackpot()">🚀 ARM — ' + op.forceJackpot + ' ' + armCtx + '</button>';
+      }
+      h += '</div></div>';
     }
-    // Jackpot force
-    h += '<div class="op-row" style="flex-direction:column;align-items:flex-start;gap:6px">';
-    h += '<span class="op-label">⚡ Force Jackpot Trigger</span>';
-    h += '<div style="display:flex;gap:6px;flex-wrap:wrap;width:100%">';
-    for (var ji = 0; ji < forceKeys.length; ji++) {
-      var jk = forceKeys[ji];
-      var jarmed = op.forceJackpot === jk ? ' armed' : '';
-      var jtxt = (op.forceJackpot === jk ? '✅ ' : '') + jk;
-      h += '<button class="op-btn force-btn' + jarmed + '" style="flex:1;min-width:56px" data-jptype="' + jk + '" onclick="Operator.selectJackpotType(this.dataset.jptype)">' + jtxt + '</button>';
-    }
-    h += '<button class="op-btn danger" style="flex:1;min-width:56px" data-jptype="none" onclick="Operator.selectJackpotType(this.dataset.jptype)">CLEAR</button>';
-    h += '</div>';
-    if (op.forceJackpot !== 'none') {
-      h += '<div style="display:flex;gap:4px;width:100%;margin-top:2px">';
-      for (var ci = 0; ci < ctxKeys.length; ci++) {
-        var ck = ctxKeys[ci];
-        var carmed = op.forceJackpotContext === ck ? ' armed' : '';
-        var ctxt = (op.forceJackpotContext === ck ? '✅ ' : '') + ctxLabels[ck];
-      h += '<button class="op-btn force-btn' + carmed + '" style="flex:1;font-size:9px" data-ctx="' + ck + '" onclick="Operator.setJackpotContext(this.dataset.ctx)">' + ctxt + '</button>';
+    h += _secEnd('force');
+
+    // ── K2: COMBINED FORCE TRIGGER ──────────────────────────────────
+    h += _sec('combo', '⚡', 'COMBINED FORCE TRIGGER');
+    if (!(op._collapsed && op._collapsed['combo'])) {
+      h += '<div style="font-size:9px;color:var(--text-dim);margin-bottom:6px">Arms a bonus trigger AND a jackpot type together. Both fire on the next spin.</div>';
+
+      // Bonus selector
+      var comboBonus  = op.comboBonus  || 'hold_spin';
+      var comboJP     = op.comboJP     || 'MINI';
+      var bonusOpts   = [
+        { key:'hold_spin',    label:'Hold & Spin' },
+        { key:'red_spin',     label:'Red Spin'    },
+        { key:'pick_choose',  label:'Pick & Choose' },
+        { key:'bonus_letters',label:'BONUS Letters' },
+      ];
+      h += '<div class="op-row"><span class="op-label">Bonus Type</span></div>';
+      h += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">';
+      for (var bi = 0; bi < bonusOpts.length; bi++) {
+        var bo  = bonusOpts[bi];
+        var bsel = comboBonus === bo.key ? ' armed' : '';
+        h += '<button class="op-btn force-btn' + bsel + '" style="flex:1;min-width:70px;font-size:10px" data-cb="' + bo.key + '" onclick="Operator.setComboBonus(this.dataset.cb)">' + (comboBonus === bo.key ? '✅ ' : '') + bo.label + '</button>';
       }
       h += '</div>';
-      var armCtx = op.forceJackpotContext === 'base' ? '(BASE REELS)' : op.forceJackpotContext === 'any' ? '(ANY CONTEXT)' : '(NEXT BONUS)';
-      h += '<button class="op-btn" style="width:100%;background:linear-gradient(135deg,#1a3a1a,#0d1f0d);border-color:#40cc40;color:#80ff80" onclick="Operator.armJackpot()">🚀 ARM — ' + op.forceJackpot + ' ' + armCtx + '</button>';
+
+      // Jackpot selector
+      h += '<div class="op-row"><span class="op-label">Jackpot Level</span></div>';
+      h += '<div style="display:flex;gap:4px;margin-bottom:8px">';
+      for (var jci = 0; jci < jpKeys.length; jci++) {
+        var jck  = jpKeys[jci];
+        var jcsel = comboJP === jck ? ' armed' : '';
+        h += '<button class="op-btn force-btn' + jcsel + '" style="flex:1" data-cj="' + jck + '" onclick="Operator.setComboJP(this.dataset.cj)">' + (comboJP === jck ? '✅ ' : '') + jck + '</button>';
+      }
+      h += '</div>';
+
+      var comboArmed = op.comboArmed ? ' danger' : '';
+      var comboLabel = op.comboArmed ? '🔴 COMBO ARMED — DISARM' : '🚀 ARM COMBO';
+      h += '<button class="op-btn' + comboArmed + '" style="width:100%" onclick="Operator.armCombo()">' + comboLabel + '</button>';
     }
-    h += '</div></div>';
+    h += _secEnd('combo');
 
     // Reel Stops
-    h += '<div class="op-section">';
-    h += '<div class="op-section-title">🎯 FORCE REEL STOPS</div>';
-    h += '<div style="display:flex;gap:5px;margin-bottom:6px">';
-    for (var ri = 0; ri < 5; ri++) {
-      var rv = (op.forceReelStops[ri] != null) ? op.forceReelStops[ri] : '';
-      h += '<input class="op-input" id="op-stop' + ri + '" type="number" min="0" max="79" placeholder="R' + (ri+1) + '" style="width:52px;padding:5px 4px;font-size:12px" value="' + rv + '">';
+    h += _sec('reels', '🎯', 'FORCE REEL STOPS');
+    if (!(op._collapsed && op._collapsed['reels'])) {
+      h += '<div style="display:flex;gap:5px;margin-bottom:6px">';
+      for (var ri = 0; ri < 5; ri++) {
+        var rv = (op.forceReelStops[ri] != null) ? op.forceReelStops[ri] : '';
+        h += '<input class="op-input" id="op-stop' + ri + '" type="number" min="0" max="79" placeholder="R' + (ri+1) + '" style="width:52px;padding:5px 4px;font-size:12px" value="' + rv + '">';
+      }
+      h += '</div>';
+      h += '<div style="display:flex;gap:6px;justify-content:flex-end">';
+      h += '<button class="op-btn" onclick="Operator.applyReelStops()">SET STOPS</button>';
+      h += '<button class="op-btn danger" onclick="Operator.clearReelStops()">CLEAR</button>';
+      h += '</div>';
     }
-    h += '</div>';
-    h += '<div style="display:flex;gap:6px;justify-content:flex-end">';
-    h += '<button class="op-btn" onclick="Operator.applyReelStops()">SET STOPS</button>';
-    h += '<button class="op-btn danger" onclick="Operator.clearReelStops()">CLEAR</button>';
-    h += '</div></div>';
+    h += _secEnd('reels');
 
     // Balance & Jackpots
-    h += '<div class="op-section">';
-    h += '<div class="op-section-title">💰 BALANCE &amp; JACKPOTS</div>';
-    h += '<div class="op-row"><span class="op-label">Current Balance</span><span class="op-val">$' + GameState.balance.toFixed(2) + '</span></div>';
-    h += '<div class="op-row"><span class="op-label">Set Balance $</span>';
-    h += '<input class="op-input" id="op-bal" type="number" min="0" step="10" value="' + op.startingBalance + '"></div>';
-    h += '<div style="text-align:right;margin-bottom:8px"><button class="op-btn" onclick="Operator.setBalance()">SET BALANCE</button></div>';
-    for (var jpi = 0; jpi < jpKeys.length; jpi++) {
-      var jpk = jpKeys[jpi];
-      h += '<div class="op-row"><span class="op-label">' + jpk + ' Jackpot</span>';
-      h += '<span class="op-val">$' + GameState.jackpots[jpk].current.toFixed(2) + '</span>';
-      h += '<button class="op-btn danger" style="padding:4px 8px;font-size:10px" data-jpkey="' + jpk + '" onclick="Operator.resetJP(this.dataset.jpkey)">RESET</button></div>';
+    h += _sec('balance', '💰', 'BALANCE &amp; JACKPOTS');
+    if (!(op._collapsed && op._collapsed['balance'])) {
+      h += '<div class="op-row"><span class="op-label">Current Balance</span><span class="op-val">$' + GameState.balance.toFixed(2) + '</span></div>';
+      h += '<div class="op-row"><span class="op-label">Set Balance $</span>';
+      h += '<input class="op-input" id="op-bal" type="number" min="0" step="10" value="' + op.startingBalance + '"></div>';
+      h += '<div style="text-align:right;margin-bottom:8px"><button class="op-btn" onclick="Operator.setBalance()">SET BALANCE</button></div>';
+      for (var jpi = 0; jpi < jpKeys.length; jpi++) {
+        var jpk = jpKeys[jpi];
+        h += '<div class="op-row"><span class="op-label">' + jpk + ' Jackpot</span>';
+        h += '<span class="op-val">$' + GameState.jackpots[jpk].current.toFixed(2) + '</span>';
+        h += '<button class="op-btn danger" style="padding:4px 8px;font-size:10px" data-jpkey="' + jpk + '" onclick="Operator.resetJP(this.dataset.jpkey)">RESET</button></div>';
+      }
+      h += '<div style="text-align:right;margin-top:6px"><button class="op-btn danger" onclick="Operator.resetAllJP()">RESET ALL JACKPOTS</button></div>';
     }
-    h += '<div style="text-align:right;margin-top:6px"><button class="op-btn danger" onclick="Operator.resetAllJP()">RESET ALL JACKPOTS</button></div>';
-    h += '</div>';
-
-    // Auto-play
-    h += '<div class="op-section">';
-    h += '<div class="op-section-title">🤖 AUTO-PLAY</div>';
-    h += '<div class="op-row"><span class="op-label">Spins</span>';
-    h += '<input class="op-input" id="op-autospins" type="number" min="0" max="1000" step="10" value="' + op.autoPlaySpins + '"></div>';
-    h += '<div class="op-row"><span class="op-label">Loss Limit $</span>';
-    h += '<input class="op-input" id="op-losslimit" type="number" min="0" step="10" value="' + op.autoPlayLossLimit + '"></div>';
-    h += '<div class="op-row"><span class="op-label">Win Limit $</span>';
-    h += '<input class="op-input" id="op-winlimit" type="number" min="0" step="10" value="' + op.autoPlayWinLimit + '"></div>';
-    h += '<div style="text-align:right"><button class="op-btn" onclick="Operator.applyAutoPlay()">APPLY AUTO-PLAY</button></div>';
-    h += '</div>';
+    h += _secEnd('balance');
 
     // Bonus Stats
-    h += '<div class="op-section">';
-    h += '<div class="op-section-title">📈 BONUS STATS</div>';
-    h += '<div class="op-rtp-stats">';
-    h += 'Red Spin Triggers: <span>' + st.redSpinCount + '</span><br>';
-    h += 'Hold &amp; Spin Triggers: <span>' + st.holdSpinCount + '</span><br>';
-    h += 'Pick &amp; Choose Triggers: <span>' + st.pickChooseCount + '</span><br>';
-    h += 'MINI Jackpots: <span>' + st.jackpotWins.MINI + '</span><br>';
-    h += 'MINOR Jackpots: <span>' + st.jackpotWins.MINOR + '</span><br>';
-    h += 'MAJOR Jackpots: <span>' + st.jackpotWins.MAJOR + '</span><br>';
-    h += 'GRAND Jackpots: <span>' + st.jackpotWins.GRAND + '</span>';
-    h += '</div></div>';
+    h += _sec('stats', '📈', 'BONUS STATS');
+    if (!(op._collapsed && op._collapsed['stats'])) {
+      h += '<div class="op-rtp-stats">';
+      h += 'Red Spin Triggers: <span>' + st.redSpinCount + '</span><br>';
+      h += 'Hold &amp; Spin Triggers: <span>' + st.holdSpinCount + '</span><br>';
+      h += 'Pick &amp; Choose Triggers: <span>' + st.pickChooseCount + '</span><br>';
+      h += 'MINI Jackpots: <span>' + st.jackpotWins.MINI + '</span><br>';
+      h += 'MINOR Jackpots: <span>' + st.jackpotWins.MINOR + '</span><br>';
+      h += 'MAJOR Jackpots: <span>' + st.jackpotWins.MAJOR + '</span><br>';
+      h += 'GRAND Jackpots: <span>' + st.jackpotWins.GRAND + '</span>';
+      h += '</div>';
+    }
+    h += _secEnd('stats');
 
     // Event Log
-    h += '<div class="op-section">';
-    h += '<div class="op-section-title">📋 EVENT LOG &amp; REPLAY</div>';
-    h += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
-    h += '<button class="op-btn" data-tab="games" onclick="Operator.showLog(this.dataset.tab)">LAST 10 GAMES</button>';
-    h += '<button class="op-btn" data-tab="events" onclick="Operator.showLog(this.dataset.tab)">FULL LOG</button>';
-    h += '<button class="op-btn" onclick="exportLogAsCSV()">EXPORT CSV</button>';
-    h += '<button class="op-btn" onclick="exportLogAsJSON()">EXPORT JSON</button>';
-    h += '</div></div>';
+    h += _sec('log', '📋', 'EVENT LOG &amp; AUDIT HISTORY');
+    if (!(op._collapsed && op._collapsed['log'])) {
+      h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">';
+      h += '<button class="op-btn" onclick="Operator.showLog()">📋 SPIN LOG &amp; EVENTS</button>';
+      h += '</div>';
+      h += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+      h += '<button class="op-btn" onclick="exportHistoryCSV()">⬇ CSV</button>';
+      h += '<button class="op-btn" onclick="exportHistoryJSON()">⬇ JSON</button>';
+      h += '<button class="op-btn danger" onclick="Operator.confirmClearHistory()">CLEAR HISTORY</button>';
+      h += '</div>';
+    }
+    h += _secEnd('log');
 
     // Reset
-    h += '<div class="op-section">';
-    h += '<div class="op-section-title">⚠️ RESET OPTIONS</div>';
-    h += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
-    h += '<button class="op-btn danger" onclick="Operator.resetGame(false)">RESET PLAYER</button>';
-    h += '<button class="op-btn danger" onclick="Operator.resetGame(true)">FULL RESET</button>';
-    h += '</div></div>';
+    h += _sec('reset', '⚠️', 'RESET OPTIONS');
+    if (!(op._collapsed && op._collapsed['reset'])) {
+      h += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+      h += '<button class="op-btn danger" onclick="Operator.resetGame(false)">RESET PLAYER</button>';
+      h += '<button class="op-btn danger" onclick="Operator.resetGame(true)">FULL RESET</button>';
+      h += '</div>';
+    }
+    h += _secEnd('reset');
     h += '<div style="height:20px"></div>';
 
     panel.innerHTML = h;
@@ -324,10 +405,72 @@ var Operator = (function() {
   }
 
   function resetRedSpinContinuance() {
-    GameState.operator.redSpinContinuance = 0.65;
+    // Reset to the canonical default defined in paytable.js
+    var def = (typeof RED_SPIN_CONTINUANCE_DEFAULT !== 'undefined') ? RED_SPIN_CONTINUANCE_DEFAULT : 0.70;
+    GameState.operator.redSpinContinuance = def;
     saveState();
     renderPanel();
-    UI.showToast('Red Spin continuance reset to 65%');
+    UI.showToast('Red Spin continuance reset to ' + Math.round(def * 100) + '%');
+  }
+
+  // ── DISARM ALL — clears every armed force trigger at once ─────────────
+  function disarmAll() {
+    var op = GameState.operator;
+    op.forceRedSpin      = false;
+    op.forceFreeSpins    = false;
+    op.forceBonusGame    = false;
+    op.forceBonusFeature = false;
+    op.forceJackpot      = 'none';
+    op.forceJackpotContext = 'bonus';
+    saveState();
+    renderPanel();
+    UI.showToast('All force triggers disarmed');
+  }
+
+  // ── SECTION COLLAPSE TOGGLE ───────────────────────────────────────────
+  function toggleSection(key) {
+    var op = GameState.operator;
+    if (!op._collapsed) op._collapsed = {};
+    op._collapsed[key] = !op._collapsed[key];
+    // Don't persist collapse state — session-only UX preference
+    renderPanel();
+  }
+
+  function setComboBonus(val) {
+    GameState.operator.comboBonus = val;
+    saveState(); renderPanel();
+  }
+
+  function setComboJP(val) {
+    GameState.operator.comboJP = val;
+    saveState(); renderPanel();
+  }
+
+  function armCombo() {
+    var op = GameState.operator;
+    if (op.comboArmed) {
+      // Disarm — clear all combo flags
+      op.comboArmed          = false;
+      op.forceBonusGame      = false;
+      op.forceRedSpin        = false;
+      op.forceFreeSpins      = false;
+      op.forceBonusFeature   = false;
+      op.forceJackpot        = 'none';
+      op.forceJackpotContext = 'bonus';
+      saveState(); renderPanel();
+      return;
+    }
+    // Arm — set bonus force AND jackpot force
+    op.comboArmed = true;
+    var bonus = op.comboBonus || 'hold_spin';
+    op.forceBonusGame    = bonus === 'hold_spin';
+    op.forceRedSpin      = bonus === 'red_spin';
+    op.forceFreeSpins    = bonus === 'pick_choose';
+    op.forceBonusFeature = bonus === 'bonus_letters';
+    op.forceJackpot        = op.comboJP || 'MINI';
+    op.forceJackpotContext = 'bonus'; // fires inside the bonus
+    saveState(); renderPanel();
+    UI.showToast('⚡ COMBO ARMED: ' + bonus.replace('_',' ').toUpperCase() + ' + ' + op.forceJackpot);
   }
 
   function toggleForce(key) {
@@ -498,15 +641,6 @@ var Operator = (function() {
     UI.showToast('All jackpots reset');
   }
 
-  function applyAutoPlay() {
-    const op = GameState.operator;
-    op.autoPlaySpins     = parseInt(($('op-autospins')||{}).value)||0;
-    op.autoPlayLossLimit = parseFloat(($('op-losslimit')||{}).value)||0;
-    op.autoPlayWinLimit  = parseFloat(($('op-winlimit')||{}).value)||0;
-    saveState();
-    UI.showToast('Auto-play settings applied');
-  }
-
   function resetGame(full) {
     if (!confirm(full ? 'Full reset? Clears all stats, balance, jackpots.' :
                         'Reset player balance and stats?')) return;
@@ -518,65 +652,148 @@ var Operator = (function() {
   }
 
   // ── EVENT LOG VIEWER ─────────────────────────────────────────────────
-  function showLog(tab = 'games') {
+  function showLog(tab) { tab = tab || 'history';
     const screen = $('log-screen');
     if (!screen) return;
     screen.classList.add('active');
     renderLogTab(tab);
   }
 
-  function renderLogTab(tab) {
+  function _formatGameRow(g) {
+    var s       = g.summary || {};
+    var net     = (s.netResult != null) ? s.netResult : 0;
+    var winCls  = net >= 0 ? 'win' : 'loss';
+    var netStr  = (net >= 0 ? '+' : '-') + '$' + Math.abs(net).toFixed(2);
+    var betAmt  = (g.bet && g.bet.total != null) ? g.bet.total.toFixed(2) : '?';
+    var bonuses = (g.bonuses && g.bonuses.length) ? g.bonuses.map(function(b){return b.type;}).join(', ') : 'None';
+    var centerStr = (g.centerRow && g.centerRow.length) ? g.centerRow.join(' - ') : '—';
+    var stopsStr  = (g.reelStops && g.reelStops.length) ? '[' + g.reelStops.join('-') + ']' : '';
+    var denomStr  = g.denom ? (Math.round(g.denom * 100) + '¢') : '';
+    var cplStr    = g.creditsPerLine ? g.creditsPerLine + 'cr' : '';
+    var betLine   = [denomStr, cplStr, '20L', 'Bet $' + betAmt].filter(Boolean).join(' · ');
+    // Payline names for this spin
+    var plNames = '';
+    if (g.baseResult && g.baseResult.wins && g.baseResult.wins.length) {
+      var names = g.baseResult.wins.filter(function(w) { return w.lineName; }).map(function(w) { return w.lineName; });
+      if (names.length) plNames = '<div style="font-size:9px;color:#c0a840;margin-top:1px">Lines: ' + names.join(', ') + '</div>';
+    }
+
+    var h = '';
+    h += '<div class="log-game-header">';
+    h += '<span class="log-game-num">Spin #' + (g.gameNumber || '?') + '</span>';
+    h += '<span class="log-game-time">' + (g.timeFormatted || '') + '</span>';
+    h += '</div>';
+    h += '<div style="font-size:11px;color:#e8d97a;margin:2px 0">' + centerStr + ' ' + stopsStr + '</div>';
+    h += plNames;
+    h += '<div style="font-size:10px;color:var(--text-dim)">' + betLine + '</div>';
+    h += '<div class="log-game-result ' + winCls + '">' + netStr + '</div>';
+    if (bonuses !== 'None') h += '<div class="log-game-bonuses">🎰 ' + bonuses + '</div>';
+    return h;
+  }
+
+  function renderLogTab(tab, filterMode) {
+    if (filterMode === undefined) filterMode = 'all';
     var logContent = $('log-content');
     if (!logContent) return;
     logContent.innerHTML = '';
 
-    if (tab === 'games') {
-      var games = GameState.eventLog.games;
-      if (!games.length) {
-        logContent.innerHTML = '<p style="color:var(--text-dim);padding:20px;text-align:center">No games recorded yet.</p>';
-        return;
-      }
-      for (var gi = 0; gi < games.length; gi++) {
-        var g = games[gi];
-        var net     = (g.summary && g.summary.netResult != null) ? g.summary.netResult : 0;
-        var winCls  = net >= 0 ? 'win' : 'loss';
-        var netStr  = (net >= 0 ? '+' : '') + '$' + Math.abs(net).toFixed(2);
-        var bonuses = (g.bonuses && g.bonuses.length) ? g.bonuses.map(function(b){return b.type;}).join(', ') : 'None';
-        var canReplay = !GameState.spinInProgress && !GameState.activeBonus;
-        var betAmt  = (g.bet && g.bet.total) ? g.bet.total.toFixed(2) : '?';
+    // ── FILTER BAR ────────────────────────────────────────────────────
+    var filterBar = document.createElement('div');
+    filterBar.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap;padding:7px 10px;background:rgba(0,0,0,0.55);border-bottom:1px solid rgba(255,220,80,0.2);position:sticky;top:0;z-index:3;';
+    [
+      { key:'all',      label:'All' },
+      { key:'wins',     label:'Wins ✓' },
+      { key:'losses',   label:'Losses' },
+      { key:'bonuses',  label:'Bonuses 🎰' },
+      { key:'jackpots', label:'Jackpots 💰' },
+    ].forEach(function(f) {
+      var btn = document.createElement('button');
+      btn.textContent = f.label;
+      var isActive = f.key === filterMode;
+      btn.style.cssText = 'font-size:10px;padding:3px 9px;border-radius:10px;border:1px solid rgba(255,220,80,' + (isActive ? '0.7' : '0.3') + ');background:' + (isActive ? 'rgba(245,197,24,0.22)' : 'rgba(0,0,0,0.3)') + ';color:' + (isActive ? '#f5d878' : 'rgba(255,255,255,0.45)') + ';cursor:pointer;';
+      btn.addEventListener('click', function() { renderLogTab(tab, f.key); });
+      filterBar.appendChild(btn);
+    });
+    logContent.appendChild(filterBar);
+
+    // ── SPIN HISTORY SECTION ──────────────────────────────────────────
+    var history = GameState.spinHistory || [];
+
+    // Apply filter
+    var filtered = history.filter(function(g) {
+      if (filterMode === 'all') return true;
+      var s   = g.summary || {};
+      var net = s.netResult || 0;
+      var hasBonuses  = g.bonuses && g.bonuses.length > 0;
+      var hasJackpot  = g.bonuses && g.bonuses.some(function(b) {
+        return b.outcome && b.outcome.jackpotType;
+      });
+      if (filterMode === 'wins')     return net > 0;
+      if (filterMode === 'losses')   return net <= 0;
+      if (filterMode === 'bonuses')  return hasBonuses;
+      if (filterMode === 'jackpots') return hasJackpot;
+      return true;
+    });
+
+    var statsHdr = document.createElement('div');
+    statsHdr.style.cssText = 'padding:7px 10px;background:rgba(0,0,0,0.5);border-bottom:1px solid rgba(255,220,80,0.25);font-size:10px;color:var(--text-dim);';
+    var stats = GameState.stats;
+    var lRTP  = stats.totalWagered > 0 ? (stats.totalWon / stats.totalWagered * 100).toFixed(1) : '—';
+    statsHdr.innerHTML = '<b style="color:var(--gold)">📊 ' + filtered.length.toLocaleString() + ' / ' + history.length.toLocaleString() + ' spins</b>'
+      + ' · Wagered: $' + (stats.totalWagered||0).toFixed(2)
+      + ' · Paid: $' + (stats.totalWon||0).toFixed(2)
+      + ' · RTP: ' + lRTP + '%';
+    logContent.appendChild(statsHdr);
+
+    if (!filtered.length) {
+      var noHist = document.createElement('p');
+      noHist.style.cssText = 'color:var(--text-dim);padding:10px 20px;font-size:11px';
+      noHist.textContent = history.length ? 'No spins match this filter.' : 'No spin history yet.';
+      logContent.appendChild(noHist);
+    } else {
+      var slice = filtered.slice(0, 150);
+      for (var hi = 0; hi < slice.length; hi++) {
+        var g = slice[hi];
         var row = document.createElement('div');
         row.className = 'log-game-row';
-        var rowH = '';
-        rowH += '<div class="log-game-header">';
-        rowH += '<span class="log-game-num">Game #' + g.gameNumber + '</span>';
-        rowH += '<span class="log-game-time">' + (g.timeFormatted || '') + '</span>';
-        rowH += '</div>';
-        rowH += '<div style="display:flex;justify-content:space-between;align-items:center">';
-        rowH += '<div>';
-        rowH += '<div class="log-game-result ' + winCls + '">Bet $' + betAmt + ' | ' + netStr + '</div>';
-        rowH += '<div class="log-game-bonuses">Bonuses: ' + bonuses + '</div>';
-        rowH += '</div>';
-        rowH += '<button class="log-replay-btn" ' + (canReplay ? '' : 'disabled') + ' data-gameid="' + g.gameId + '" onclick="Operator.replayGame(this.dataset.gameid)">▶ REPLAY</button>';
-        rowH += '</div>';
-        row.innerHTML = rowH;
+        row.innerHTML = _formatGameRow(g);
         logContent.appendChild(row);
       }
-    } else {
-      var allEvents = GameState.eventLog.allEvents.slice().reverse();
-      if (!allEvents.length) {
-        logContent.innerHTML = '<p style="color:var(--text-dim);padding:20px;text-align:center">No events logged yet.</p>';
-        return;
+      if (filtered.length > 150) {
+        var more = document.createElement('div');
+        more.style.cssText = 'text-align:center;color:var(--text-dim);padding:6px;font-size:10px';
+        more.textContent = '… ' + (filtered.length - 150).toLocaleString() + ' more — use CSV export for full history';
+        logContent.appendChild(more);
       }
-      var evSlice = allEvents.slice(0, 200);
+    }
+
+    // ── RAW EVENTS SECTION ────────────────────────────────────────────
+    var evHdr = document.createElement('div');
+    evHdr.style.cssText = 'padding:6px 10px;background:rgba(0,0,0,0.5);border-top:1px solid rgba(255,220,80,0.25);border-bottom:1px solid rgba(255,220,80,0.15);font-size:10px;color:var(--gold);margin-top:4px';
+    evHdr.textContent = '🔍 RAW EVENT LOG (most recent first)';
+    logContent.appendChild(evHdr);
+
+    var allEvents = (GameState.eventLog.allEvents || []).slice().reverse();
+    if (!allEvents.length) {
+      var noEv = document.createElement('p');
+      noEv.style.cssText = 'color:var(--text-dim);padding:10px 20px;font-size:11px';
+      noEv.textContent = 'No events yet.';
+      logContent.appendChild(noEv);
+    } else {
+      var evSlice = allEvents.slice(0, 150);
       for (var ei = 0; ei < evSlice.length; ei++) {
         var e = evSlice[ei];
         var detail = '';
-        if (e.type === 'CASH_OUT')      detail = 'Voucher ' + (e.voucherId||'') + ' $' + ((e.amount||0).toFixed(2));
-        else if (e.type === 'CASH_IN')  detail = 'Voucher ' + (e.voucherId||'') + ' $' + ((e.amount||0).toFixed(2));
-        else if (e.totalWin != null)    detail = 'Win: $' + (e.totalWin||0).toFixed(2);
-        else if (e.amount != null)      detail = '$' + e.amount.toFixed(2);
-        else                            detail = e.bonusType || '';
-        var typeColor = e.type === 'CASH_OUT' ? '#7dcc20' : (e.type === 'CASH_IN' ? '#40a0ff' : 'var(--gold)');
+        if (e.type === 'CASH_OUT' || e.type === 'CASH_IN') detail = 'Voucher ' + (e.voucherId||'') + ' $' + ((e.amount||0).toFixed(2));
+        else if (e.totalWin != null) detail = 'Win: $' + (e.totalWin||0).toFixed(2);
+        else if (e.amount != null)   detail = '$' + e.amount.toFixed(2);
+        else if (e.bonusType)        detail = e.bonusType;
+        // Add payline name if present
+        if (e.type === 'SPIN_RESULT' && e.wins && e.wins.length) {
+          var winNames = e.wins.filter(function(w) { return w.lineName; }).map(function(w) { return w.lineName; });
+          if (winNames.length) detail += ' [' + winNames.slice(0,3).join(', ') + ']';
+        }
+        var typeColor = e.type === 'CASH_OUT' ? '#7dcc20' : e.type === 'CASH_IN' ? '#40a0ff' : 'var(--gold)';
         var eRow = document.createElement('div');
         eRow.className = 'log-event-row';
         eRow.innerHTML = '<span class="log-event-time">' + ((e.timeFormatted||'').slice(-8)) + '</span>'
@@ -587,18 +804,12 @@ var Operator = (function() {
     }
   }
 
-  async function replayGame(gameId) {
-    if (GameState.spinInProgress || GameState.activeBonus) {
-      UI.showToast('Replay unavailable during active game'); return;
+  function confirmClearHistory() {
+    if (confirm('Clear all ' + (GameState.spinHistory ? GameState.spinHistory.length : 0) + ' spin history records? This cannot be undone.')) {
+      clearSpinHistory();
+      renderPanel(); // refresh button count
+      UI.showToast('History cleared');
     }
-    var game = null;
-    for (var _ri = 0; _ri < GameState.eventLog.games.length; _ri++) {
-      if (GameState.eventLog.games[_ri].gameId === gameId) { game = GameState.eventLog.games[_ri]; break; }
-    }
-    if (!game) return;
-    closeLogScreen();
-    closePanel();
-    await Bonuses.replayGame(game);
   }
 
   function closeLogScreen() {
@@ -638,10 +849,11 @@ var Operator = (function() {
   }
 
   return {
-    init, closePanel, showLog, replayGame,
+    init, closePanel, showLog, confirmClearHistory,
     applyRTP, applyBonusSettings, resetRedSpinContinuance, toggleForce, setForceJP,
     selectJackpotType, setJackpotContext, armJackpot,
+    disarmAll, toggleSection, setComboBonus, setComboJP, armCombo,
     applyReelStops, clearReelStops, setBalance,
-    resetJP, resetAllJP, applyAutoPlay, resetGame,
+    resetJP, resetAllJP, resetGame,
   };
 })();

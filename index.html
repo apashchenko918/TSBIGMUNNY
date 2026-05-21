@@ -2,18 +2,54 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-  <!-- CACHE BUST: Clear old cache API entries (does NOT affect localStorage/game state) -->
+  <!-- CACHE BUST: Clear ALL old cache API entries on page load.
+       The service worker's activate handler is the authoritative keeper of the current cache.
+       This inline block simply nukes everything — the SW will rebuild the correct cache.
+       NEVER hardcode a specific cache name here. CACHE_NAME lives in service-worker.js ONLY. -->
   <script>
+    // ── GAME VERSION — single source of truth in index.html ───────────────
+    // MANDATORY RULE: Update GAME_VERSION on every build alongside CACHE_NAME.
+    // This is displayed on the splash screen and used for cache validation.
+    // Never deliver a zip with a stale GAME_VERSION.
+    var GAME_VERSION = 'v6l99';
+
     (function() {
-      // Only delete old cache API entries — never touch localStorage (game state)
+      // 1. Delete ALL cache API entries so SW always re-fetches on version change
+      //    Never touch localStorage — game state lives there
       if ('caches' in window) {
         caches.keys().then(function(names) {
-          names.forEach(function(name) {
-            if (name !== 'turrelle-v6a') caches.delete(name);
-          });
+          names.forEach(function(name) { caches.delete(name); });
+        });
+      }
+
+      // 2. Version-aware hard reload: if the SW is serving a different version,
+      //    force a full reload so the player never runs stale cached code.
+      //    Compares the version cookie to GAME_VERSION; reloads once if mismatch.
+      try {
+        var storedVer = sessionStorage.getItem('__turrelle_ver');
+        if (storedVer && storedVer !== GAME_VERSION) {
+          sessionStorage.setItem('__turrelle_ver', GAME_VERSION);
+          // Hard reload bypasses SW cache
+          window.location.reload(true);
+        } else {
+          sessionStorage.setItem('__turrelle_ver', GAME_VERSION);
+        }
+      } catch(e) {}
+
+      // 3. Force SW update check on every page load (not just first)
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistration().then(function(reg) {
+          if (reg) reg.update();
         });
       }
     })();
+  </script>
+  <script>
+    // Inject GAME_VERSION into the splash badge as soon as DOM is ready
+    document.addEventListener('DOMContentLoaded', function() {
+      var badge = document.getElementById('splash-version');
+      if (badge) badge.textContent = GAME_VERSION;
+    });
   </script>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
@@ -32,7 +68,7 @@
 <meta name="format-detection" content="telephone=no">
 <title>The Turrelle Sisters Big Munny</title>
 <link rel="icon" href="assets/icons/icon-96x96.png">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=6l93">
 <style>
 /* ── INSERT CASH TO PLAY — reel overlay msg ── */
 #reels-insert-msg {
@@ -76,6 +112,16 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 #splash-screen.fade-out{opacity:0;pointer-events:none;}
 #splash-screen.hidden{display:none;}
 
+/* MANDATORY: version badge bottom-right of splash — update GAME_VERSION every build */
+#splash-version {
+  position:absolute;bottom:10px;right:12px;
+  font-family:'Courier New',monospace;font-size:11px;font-weight:700;
+  color:rgba(245,197,24,0.9);background:rgba(0,0,0,0.6);
+  border:1px solid rgba(245,197,24,0.35);border-radius:4px;
+  padding:2px 7px;letter-spacing:1px;pointer-events:none;z-index:10;
+  text-shadow:0 0 6px rgba(245,197,24,0.5);
+}
+
 #splash-img{
   width:100%;
   height:100%;
@@ -96,16 +142,27 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 }
 @keyframes splashGlow{0%{opacity:0.5;}100%{opacity:1;}}
 
-#splash-tap{
-  position:absolute;bottom:40px;
-  left:50%;transform:translateX(-50%);
-  white-space:nowrap;
-  font-family:var(--font-display);
-  font-size:14px;color:rgba(212,175,55,0.85);
-  letter-spacing:3px;text-transform:uppercase;
-  animation:splashBlink 1.2s ease-in-out infinite;
+#splash-tap {
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: #d4af37;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(212,175,55,0.9), 0 0 24px rgba(212,175,55,0.5);
+  animation: splashTapBlink 1.1s ease-in-out infinite;
+  white-space: nowrap;
+  pointer-events: none;
 }
-@keyframes splashBlink{0%,100%{opacity:1;}50%{opacity:0.25;}}
+@keyframes splashTapBlink {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+
+#splash-loading { display: none; } /* replaced by tap-to-play */
 
 #splash-particles{
   position:absolute;inset:0;pointer-events:none;overflow:hidden;
@@ -145,6 +202,8 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
   <div id="splash-particles" id="sp-container"></div>
   <img id="splash-img" src="assets/splash_screen.jpg" alt="The Turrelle Sisters Big Munny">
   <div id="splash-tap">TAP TO PLAY</div>
+  <!-- MANDATORY: version badge — always visible on splash, updated every build -->
+  <div id="splash-version"></div>
 </div>
 
 <div id="install-prompt">
@@ -221,6 +280,10 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
           <button class="denom-option" data-denom="0.25">25¢</button>
           <button class="denom-option" data-denom="0.50">50¢</button>
           <button class="denom-option" data-denom="1.00">$1</button>
+          <button class="denom-option" data-denom="2.00">$2</button>
+          <button class="denom-option" data-denom="3.00">$3</button>
+          <button class="denom-option" data-denom="5.00">$5</button>
+          <!-- $10 and $20 denominations permanently removed v6l94 -->
         </div>
       </div>
     </div>
@@ -233,7 +296,7 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
         <div class="bet-stat"><span class="bet-label">TOTAL BET</span><span id="total-bet-display2">$1.00</span></div>
       </div>
       <div id="bet-buttons">
-        <button id="bet-one-btn">BET ONE</button>
+        <button id="bet-one-btn">SELECT LINES</button>
         <button id="spin-btn">SPIN</button>
         <button id="bet-max-btn">BET MAX</button>
       </div>
@@ -269,8 +332,8 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
     <div class="bonus-jp-meter"><div class="bonus-jp-label">MINI</div><div class="bonus-jp-amount" id="hold-jp-mini">$25.00</div></div>
   </div>
   <div id="hold-title">HOLD &amp; SPIN</div>
-  <div id="respin-counter">3 RESPINS</div>
   <div id="hold-board"></div>
+  <div id="respin-counter"><span id="respin-badge">3</span><span class="respin-label">respins remaining</span></div>
   <div id="hold-total-row"><div id="hold-total-label">BOARD TOTAL</div><div id="hold-total-val">$0.00</div></div>
 </div>
 
@@ -425,103 +488,78 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 <div id="additional-rs-banner" style="display:none;position:fixed;inset:0;z-index:125;background:rgba(180,0,0,0.85);align-items:center;justify-content:center;flex-direction:column;pointer-events:none;">
   <div id="additional-rs-text">ADDITIONAL RED SPINS WON!</div>
   <div id="additional-rs-sub">Get Ready...</div>
+  <div id="additional-rs-tap">Get Ready...</div>
 </div>
 
 <div id="toast"></div>
-<div id="replay-banner"></div>
-<div id="replay-watermark"><span>AUDIT MODE</span></div>
+
 
 <!-- SCRIPTS — load order matters -->
-<script src="paytable.js"></script>
-<script src="state.js"></script>
-<script src="audio.js"></script>
-<script src="game.js"></script>
-<script src="bonuses.js"></script>
-<script src="ui.js"></script>
-<script src="operator.js"></script>
-<script src="cashout.js"></script>
+<script src="paytable.js?v=6l59"></script>
+<script src="state.js?v=6l59"></script>
+<script src="audio.js?v=6l59"></script>
+<script src="game.js?v=6l59"></script>
+<script src="bonuses.js?v=6l59"></script>
+<script src="ui.js?v=6l59"></script>
+<script src="operator.js?v=6l59"></script>
+<script src="cashout.js?v=6l59"></script>
 
 <script>
 'use strict';
 
 // ══════════════════════════════════════════════════════════════════════
-// SPLASH SCREEN — ultra-simple, maximum browser compatibility
-// No particles, no async, no template literals, no window.Audio
-// Works on Chrome, Opera, Android WebView, emulators
+// SPLASH SCREEN — TAP TO PLAY with welcome audio
+// Player taps anywhere on splash; audio plays on tap (iOS unlock),
+// then game transitions when audio ends (or after 6s failsafe).
 (function() {
   var splash = document.getElementById('splash-screen');
   if (!splash) return;
 
   var dismissed = false;
-  var fadeTimer  = null;
 
-  // Wire listeners immediately — don't wait for image
-  splash.addEventListener('click',    onTap);
-  splash.addEventListener('touchend', onTap);
-  // NOTE: No touchstart — it blocks audio unlock gesture on Android
-  // NOTE: No preventDefault — needed for audio to work on mobile
-
-  // Hard failsafe — always exits after 8 seconds even with zero interaction
-  setTimeout(function() { dismiss(false); }, 8000);
-
-  function onTap() {
-    dismiss(true);
-  }
-
-  // Preload splash audio immediately on script run (before any tap)
   var splashSnd = document.createElement('audio');
   splashSnd.src = 'assets/audio/splash_welcome.wav';
   splashSnd.preload = 'auto';
-  splashSnd.volume = 0.85;
+  splashSnd.volume  = 0.85;
   splashSnd.load();
 
-  function dismiss(fromGesture) {
+  function doFade() {
     if (dismissed) return;
     dismissed = true;
-
-    // Unlock Web Audio engine
-    try { if (typeof Audio !== 'undefined' && Audio.resume) Audio.resume(); } catch(e) {}
-
-    if (fromGesture) {
-      var faded = false;
-      var guard = setTimeout(function() {
-        if (!faded) { faded = true; doFade(); }
-      }, 4000);
-
-      try {
-        splashSnd.currentTime = 0; // Reset to start
-        splashSnd.onended = function() {
-          if (!faded) { faded = true; clearTimeout(guard); doFade(); }
-        };
-        splashSnd.onerror = function() {
-          if (!faded) { faded = true; clearTimeout(guard); doFade(); }
-        };
-        var p = splashSnd.play();
-        if (p && p.catch) {
-          p.catch(function() {
-            if (!faded) { faded = true; clearTimeout(guard); doFade(); }
-          });
-        }
-      } catch(err) {
-        clearTimeout(guard);
-        if (!faded) { faded = true; doFade(); }
-      }
-    } else {
-      doFade();
-    }
-  }
-
-  function doFade() {
     try {
       if (typeof Audio !== 'undefined' && Audio.startAmbientMusic) {
         setTimeout(function() { try { Audio.startAmbientMusic(); } catch(e) {} }, 500);
       }
     } catch(e) {}
-    splash.style.opacity = '0';
-    splash.style.transition = 'opacity 0.7s ease';
+    splash.style.opacity       = '0';
+    splash.style.transition    = 'opacity 0.7s ease';
     splash.style.pointerEvents = 'none';
     setTimeout(function() { splash.style.display = 'none'; }, 750);
   }
+
+  function onTap() {
+    if (dismissed) return;
+    // Remove listener so double-tap doesn't re-fire
+    splash.removeEventListener('touchend', onTap);
+    splash.removeEventListener('click',    onTap);
+
+    // Hard failsafe — always exits after 6 seconds even if audio stalls
+    var hardGuard = setTimeout(function() { doFade(); }, 6000);
+
+    try {
+      splashSnd.onended = function() { clearTimeout(hardGuard); doFade(); };
+      splashSnd.onerror = function() { clearTimeout(hardGuard); doFade(); };
+      splashSnd.currentTime = 0;
+      var p = splashSnd.play();
+      if (p && p.then) {
+        p.catch(function() { clearTimeout(hardGuard); doFade(); });
+      }
+    } catch(e) { clearTimeout(hardGuard); doFade(); }
+  }
+
+  splash.addEventListener('touchend', onTap, { passive: true });
+  splash.addEventListener('click',    onTap);
+  splash.style.cursor = 'pointer';
 })();
 
 // ── SERVICE WORKER — HTTPS/localhost only ────────────────────────────
@@ -542,7 +580,7 @@ window.addEventListener('beforeinstallprompt', function(e) {
     if (deferredInstall) { var _ip=document.getElementById('install-prompt'); if(_ip) _ip.classList.add('show'); }
   }, 20000);
 });
-var _iy=document.getElementById('install-yes'); if(_iy) _iy.addEventListener('click', async function() {
+var _iy=document.getElementById('install-yes'); if(_iy) _iy.addEventListener('click', function() {
   var _ipr=document.getElementById('install-prompt'); if(_ipr) _ipr.classList.remove('show');
   if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; }
 });
@@ -617,11 +655,47 @@ window.addEventListener('popstate', function(e) {
 (function(){
   function $(id) { return document.getElementById(id); }
 
+  // ── WAKE LOCK — prevent screen timeout during bonuses ─────────────
+  var _wakeLock = null;
+  var _wakeLockVideo = null; // fallback for browsers without Wake Lock API
+
+  function _acquireWakeLock() {
+    if (typeof navigator !== 'undefined' && navigator.wakeLock) {
+      navigator.wakeLock.request('screen').then(function(lock) {
+        _wakeLock = lock;
+        _wakeLock.addEventListener('release', function() { _wakeLock = null; });
+      }).catch(function() {}); // silently fail if denied
+    } else {
+      // Fallback: hidden silent looping video keeps screen alive on older browsers
+      if (!_wakeLockVideo) {
+        _wakeLockVideo = document.createElement('video');
+        _wakeLockVideo.setAttribute('playsinline', '');
+        _wakeLockVideo.setAttribute('muted', '');
+        _wakeLockVideo.setAttribute('loop', '');
+        _wakeLockVideo.src = 'data:video/mp4;base64,AAAAIGZ0eXBtcDQyAAAAAG1wNDJtcDQxaXNvbWF2YzEAAATKbW9vdg==';
+        _wakeLockVideo.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;';
+        document.body.appendChild(_wakeLockVideo);
+      }
+      _wakeLockVideo.play().catch(function() {});
+    }
+  }
+
+  function _releaseWakeLock() {
+    if (_wakeLock) { _wakeLock.release().catch(function(){}); _wakeLock = null; }
+    if (_wakeLockVideo) { _wakeLockVideo.pause(); }
+  }
+
+  // Re-acquire on visibility change (wake lock is released when tab hides)
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && GameState.activeBonus) {
+      _acquireWakeLock();
+    }
+  });
+
   // MLMC state
   var denom          = DEFAULT_DENOM;           // current denomination
-  var creditsPerLine = DEFAULT_CREDITS_PER_LINE;// credits bet per line
-  var lines          = DEFAULT_LINES;           // active paylines
-  var autoRemaining  = 0, autoStartBalance   = 0;
+  var creditsPerLine = DEFAULT_CREDITS_PER_LINE;
+  var lines          = DEFAULT_LINES;
 
   // Load saved state
   loadState();
@@ -630,20 +704,82 @@ window.addEventListener('popstate', function(e) {
   creditsPerLine = GameState.lastCreditsPerLine || DEFAULT_CREDITS_PER_LINE;
   lines          = GameState.lastLines          || DEFAULT_LINES;
 
-  // Apply denom-correct jackpot seeds after state is loaded
-  if (typeof getJackpotSeedsForDenom !== 'undefined') {
-    var _initSeeds = getJackpotSeedsForDenom(denom);
-    Object.keys(_initSeeds).forEach(function(tier) {
-      if (GameState.jackpots[tier]) {
-        GameState.jackpots[tier].seed = _initSeeds[tier];
-        if (GameState.jackpots[tier].current < _initSeeds[tier]) {
-          GameState.jackpots[tier].current = _initSeeds[tier];
+  // Apply denom-correct jackpot seeds — scales current proportionally on denom change
+  // Owner confirmed: jackpot amounts must be correct for each denom, no cycling artifacts
+  var _lastDenomForJackpots = null;
+  function applyScaledJackpotSeeds(activeDenom, activeLines) {
+    if (typeof getJackpotSeedsForDenom === 'undefined') return;
+    var MAX_LINES = 20;
+    var lineScale = Math.max(activeLines, 1) / MAX_LINES;
+    var baseSeeds = getJackpotSeedsForDenom(activeDenom);
+    var oldSeeds  = _lastDenomForJackpots ? getJackpotSeedsForDenom(_lastDenomForJackpots) : null;
+
+    Object.keys(baseSeeds).forEach(function(tier) {
+      if (!GameState.jackpots[tier]) return;
+      var newSeed = Math.max(Math.round(baseSeeds[tier] * lineScale), 1);
+
+      if (oldSeeds && oldSeeds[tier] && oldSeeds[tier] !== baseSeeds[tier]) {
+        // Denom changed — scale current proportionally to new denom
+        // e.g. switching $5→1c: if GRAND was at $1,050,000 on $5 denom,
+        // scale to 1c equivalent: $1,050,000 × ($2,000/$1,000,000) = $2,100
+        var ratio = baseSeeds[tier] / oldSeeds[tier];
+        var scaledCurrent = Math.round(GameState.jackpots[tier].current * ratio);
+        // Clamp: must be at least the new seed, at most 3× the new seed (sanity cap)
+        GameState.jackpots[tier].current = Math.max(newSeed, Math.min(scaledCurrent, newSeed * 3));
+      } else {
+        // Same denom or first load — only raise if below seed, never lower a growing jackpot
+        if (GameState.jackpots[tier].current < newSeed) {
+          GameState.jackpots[tier].current = newSeed;
         }
       }
+      GameState.jackpots[tier].seed = newSeed;
+      // Update must-hit-by cap whenever seed changes (cap = seed × tier multiplier)
+      var mhbMult = (typeof JACKPOT_MHB_MULTIPLIERS !== 'undefined') ? (JACKPOT_MHB_MULTIPLIERS[tier] || 4) : 4;
+      GameState.jackpots[tier].mustHitBy = Math.round(newSeed * mhbMult);
     });
+    _lastDenomForJackpots = activeDenom;
   }
 
-  // ── ZERO BALANCE AUTO-RESTORE ─────────────────────────────────────────
+  if (typeof getJackpotSeedsForDenom !== 'undefined') {
+    applyScaledJackpotSeeds(denom, lines);
+  }
+
+  // ── SCREEN WAKE LOCK — prevent screen timeout during bonus games ─────────
+  // Uses the Screen Wake Lock API (Chrome/Samsung Browser 86+) with a
+  // setInterval fallback for older browsers.
+  var _wakeLock = null;
+  var _wakeInterval = null;
+
+  async function requestWakeLock() {
+    try {
+      if (navigator.wakeLock) {
+        _wakeLock = await navigator.wakeLock.request('screen');
+        _wakeLock.addEventListener('release', function() { _wakeLock = null; });
+      } else {
+        // Fallback: fire a no-op touch event every 20s to prevent timeout
+        if (!_wakeInterval) {
+          _wakeInterval = setInterval(function() {
+            var e = new Event('touchstart', { bubbles: true, cancelable: true });
+            document.dispatchEvent(e);
+          }, 20000);
+        }
+      }
+    } catch(e) { /* wake lock not supported — ignore */ }
+  }
+
+  function releaseWakeLock() {
+    try {
+      if (_wakeLock) { _wakeLock.release(); _wakeLock = null; }
+      if (_wakeInterval) { clearInterval(_wakeInterval); _wakeInterval = null; }
+    } catch(e) { /* ignore */ }
+  }
+
+  // Re-acquire on visibility restore (lock is released when tab hides)
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && GameState && GameState.activeBonus) {
+      requestWakeLock();
+    }
+  });
   // If balance is $0 and there are no redeemable vouchers, restore starting credits.
   // This prevents the game from being permanently stuck in an unplayable state.
   if (GameState.balance <= 0) {
@@ -673,7 +809,25 @@ window.addEventListener('popstate', function(e) {
 
   // Render initial grid
   var s0 = REEL_STRIPS.map(function(s) { return Math.floor(Math.random() * s.length); });
-  UI.renderGrid(buildGrid(s0));
+  var _initGrid = buildGrid(s0);
+  UI.renderGrid(_initGrid);
+
+  // Overlay real RNG coin values on any gold coins in the initial grid
+  // Uses current bet settings — matches exactly what H&S would pay if triggered
+  (function() {
+    var _initBetPerLine  = (GameState.lastCreditsPerLine || 1) * (GameState.denom || 0.01);
+    var _initLinesActive = GameState.linesActive || DEFAULT_LINES;
+    var _initCoinCount   = 0;
+    for (var _c = 0; _c < 5; _c++) {
+      for (var _r = 0; _r < 3; _r++) {
+        if (_initGrid[_c] && _initGrid[_c][_r] === BONUS_ID) _initCoinCount++;
+      }
+    }
+    if (_initCoinCount > 0 && typeof Bonuses !== 'undefined') {
+      var _initCoinData = Bonuses.pregenerateTriggerCoins(_initGrid, _initBetPerLine, _initLinesActive);
+      UI.overlayReelCoinValues(_initGrid, _initCoinData.coinMap);
+    }
+  })();
 
   // Unlock audio on first gesture (required on iOS and Android)
   var unlockAudio = function() {
@@ -698,9 +852,6 @@ window.addEventListener('popstate', function(e) {
     if ($('lines-display'))      $('lines-display').textContent      = lines;
     if ($('lines-display2'))     $('lines-display2').textContent     = lines;
     if ($('total-bet-display2')) $('total-bet-display2').textContent = '$' + totalBet.toFixed(2);
-    // Update BET ONE button to show current line count
-    var betOneBtn = $('bet-one-btn');
-    if (betOneBtn) betOneBtn.textContent = 'BET ONE (' + lines + ')';
     var credLineDisp = $('credits-line-display');
     if (credLineDisp) credLineDisp.textContent = creditsPerLine;
 
@@ -752,28 +903,31 @@ window.addEventListener('popstate', function(e) {
     });
   }
 
-  // ── BET PANEL — Neptune's Gold style ─────────────────────────────
-  // BET ONE: each tap adds 1 line (1→2→3...→20→back to 1)
-  // BET MAX: jumps to 20 lines
-  var _betOneBtn = $('bet-one-btn');
-  if (_betOneBtn) _betOneBtn.addEventListener('click', function() {
-    if (GameState.spinInProgress || GameState.activeBonus) return;
-    lines = (lines >= 20) ? 1 : lines + 1;
-    updateBetLine(); Audio.play('button_click');
-  });
+  // ── BET PANEL — SELECT LINES cycles active lines ─────────────────
+  // SELECT LINES: 5 → 10 → 15 → 20 → back to 5. Minimum 5 lines (owner-confirmed 2026-05-18).
+  // Credits/line stays selectable via credits buttons (1, 2, 3, 5).
+  // BET MAX = 5 credits/line + 20 lines. Only active lines pay wins.
+  var _betOneBtn  = $('bet-one-btn');
+  var _linesCycle = [5, 10, 15, 20];
+  if (_betOneBtn) {
+    _betOneBtn.addEventListener('click', function() {
+      if (GameState.spinInProgress || GameState.activeBonus) return;
+      var idx = _linesCycle.indexOf(lines);
+      lines = _linesCycle[(idx + 1) % _linesCycle.length];
+      applyScaledJackpotSeeds(denom, lines);
+      UI.updateJackpotMeters();
+      updateBetLine(); Audio.play('button_click');
+      // Show active payline patterns on reel grid
+      if (typeof UI !== 'undefined' && UI.showActivePaylines) UI.showActivePaylines(lines);
+    });
+  }
   var _betMaxBtn = $('bet-max-btn');
   if (_betMaxBtn) _betMaxBtn.addEventListener('click', function() {
     if (GameState.spinInProgress || GameState.activeBonus) return;
-    lines = 20;
+    creditsPerLine = 5; lines = 20;
+    applyScaledJackpotSeeds(denom, lines);
+    UI.updateJackpotMeters();
     updateBetLine(); Audio.play('button_click');
-  });
-  // Legacy line-btns support
-  document.querySelectorAll('.line-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      if (GameState.spinInProgress) return;
-      lines = parseInt(btn.dataset.lines);
-      updateBetLine(); Audio.play('button_click');
-    });
   });
 
   // ── DENOM DROPDOWN ────────────────────────────────────────────────
@@ -804,18 +958,9 @@ window.addEventListener('popstate', function(e) {
       var label = btn.textContent;
       if (denomDisplayBtn) denomDisplayBtn.textContent = label + ' ▾';
       if (denomDropdown) denomDropdown.classList.remove('open');
-      // Update jackpot seeds for new denomination
+      // Update jackpot seeds for new denomination — scaled by active lines
       if (typeof getJackpotSeedsForDenom !== 'undefined') {
-        var newSeeds = getJackpotSeedsForDenom(denom);
-        Object.keys(newSeeds).forEach(function(tier) {
-          if (GameState.jackpots[tier]) {
-            GameState.jackpots[tier].seed    = newSeeds[tier];
-            // Only reset current if below new seed (never reduce jackpot mid-session)
-            if (GameState.jackpots[tier].current < newSeeds[tier]) {
-              GameState.jackpots[tier].current = newSeeds[tier];
-            }
-          }
-        });
+        applyScaledJackpotSeeds(denom, lines);
         UI.updateJackpotMeters();
         saveState();
       }
@@ -837,7 +982,7 @@ window.addEventListener('popstate', function(e) {
   // Old bet-up/down removed — replaced by denom pills and credits buttons
   var _mb=$('max-bet-btn'); if(_mb) _mb.addEventListener('click', function() {
     if (GameState.spinInProgress) return;
-    denom = 1.00; creditsPerLine = 10; lines = 20;
+    denom = 1.00; creditsPerLine = 5; lines = 20;
     updateBetLine(); Audio.play('button_click');
   });
 
@@ -872,30 +1017,18 @@ window.addEventListener('popstate', function(e) {
   });
 
   async function doSpin() {
-    if (GameState.spinInProgress || GameState.replayMode) return;
+    if (GameState.spinInProgress) return;
     var betPerLine = Math.round(denom * creditsPerLine * 100) / 100;
     var total      = Math.round(betPerLine * lines * 100) / 100;
     if (GameState.balance <= 0) { CashOut.startZeroBalanceFlash(); UI.showToast('INSERT CASH TO PLAY'); return; }
     if (GameState.balance < total) { UI.showToast('Insufficient balance!'); return; }
     Audio.play('button_click');
+    _acquireWakeLock();
     await executeSpin(betPerLine, lines, denom, creditsPerLine);
+    _releaseWakeLock();
     refreshDisplays();
-    // balance display updated by UI.updateBalance which manages ticker automatically
-
-    if (autoRemaining > 0) {
-      autoRemaining--;
-      updateAutoBtn();
-      var op   = GameState.operator;
-      var lost = autoStartBalance - GameState.balance;
-      var won  = GameState.balance - autoStartBalance;
-      if (op.autoPlayLossLimit>0 && lost>=op.autoPlayLossLimit) { stopAuto(); UI.showToast('Auto: Loss limit'); return; }
-      if (op.autoPlayWinLimit >0 && won >=op.autoPlayWinLimit)  { stopAuto(); UI.showToast('Auto: Win limit');  return; }
-      if (autoRemaining > 0) setTimeout(doSpin, 800);
-      else stopAuto();
-    }
   }
 
-  // ── AUTO ──────────────────────────────────────────────────────────
   // ── PAYTABLE — reads live from PAY_TABLE + SYMBOLS ───────────────
   function buildPaytable() {
     var body = document.getElementById('paytable-body');
@@ -979,18 +1112,29 @@ window.addEventListener('popstate', function(e) {
     html += ptRow(S.SINGLE_BAR.file, 5, PT.SINGLE_BAR[0], '', true);
     html += ptRow(S.SINGLE_BAR.file, 4, PT.SINGLE_BAR[1], '');
     html += ptRow(S.SINGLE_BAR.file, 3, PT.SINGLE_BAR[2], '');
-    // Cherry (any row)
-    html += ptRow(S.CHERRY.file, 5, PT.CHERRY[0], 'ANY ROW', true);
-    html += ptRow(S.CHERRY.file, 4, PT.CHERRY[1], 'ANY ROW');
-    html += ptRow(S.CHERRY.file, 3, PT.CHERRY[2], 'ANY ROW');
-    html += ptRow(S.CHERRY.file, 2, PT.CHERRY[3], 'ANY ROW');
-    html += ptRow(S.CHERRY.file, 1, PT.CHERRY[3], 'ANY ROW');
-    // Mixed Bar
-    html += ptRowCash(S.SINGLE_BAR.file, 5, '$' + (Math.round(35 * bpl * 100)/100).toFixed(2), '35x/line', 'ANY MIX', true);
+    // Mixed Bar — reads live from MIXED_BAR_PAY
+    var mb5 = '$' + (Math.round((MIXED_BAR_PAY[5]||35) * bpl * 100)/100).toFixed(2);
+    var mb4 = '$' + (Math.round((MIXED_BAR_PAY[4]||15) * bpl * 100)/100).toFixed(2);
+    var mb3 = '$' + (Math.round((MIXED_BAR_PAY[3]||5)  * bpl * 100)/100).toFixed(2);
+    html += ptRowCash(S.SINGLE_BAR.file, 5, mb5, (MIXED_BAR_PAY[5]||35)+'x/line', 'ANY BAR MIX', true);
+    html += ptRowCash(S.SINGLE_BAR.file, 4, mb4, (MIXED_BAR_PAY[4]||15)+'x/line', 'ANY BAR MIX');
+    html += ptRowCash(S.SINGLE_BAR.file, 3, mb3, (MIXED_BAR_PAY[3]||5)+'x/line',  'ANY BAR MIX');
     // Lipstick
     html += ptRowCash(S.LIPSTICK.file, 5, 'BONUS', '—', 'PICK &amp; CHOOSE', true);
     html += ptRow(S.LIPSTICK.file, 4, PT.LIPSTICK[1], '');
     html += ptRow(S.LIPSTICK.file, 3, PT.LIPSTICK[2], '');
+    // Gold Coin — Hold & Spin trigger
+    html += '<div class="pt-section-note">BONUS FEATURES</div>';
+    html += '<div class="pt-row pt-divider"><div class="pt-col-sym">' + symImgs(S.GOLD_COIN.file, 1) + ' <span class="pt-note-inline">6+ ANYWHERE</span></div><div class="pt-col-cr">—</div><div class="pt-col-ca">HOLD &amp; SPIN</div></div>';
+    html += '<div class="pt-row"><div class="pt-col-sym"><span style="font-size:11px;letter-spacing:1px">🎲 RED SPIN</span></div><div class="pt-col-cr">—</div><div class="pt-col-ca">FREE RESPINS</div></div>';
+    // BONUS Letters
+    html += '<div class="pt-section-note">BONUS LETTERS (B-O-N-U-S) — ACTIVE PAYLINES</div>';
+    var BLP = BONUS_LETTER_PAYS;
+    html += '<div class="pt-row pt-divider"><div class="pt-col-sym"><span style="font-size:11px;letter-spacing:2px">B O N U S</span></div><div class="pt-col-cr">—</div><div class="pt-col-ca">BONUS GAME</div></div>';
+    html += '<div class="pt-row"><div class="pt-col-sym"><span style="font-size:11px;letter-spacing:2px">B O N U</span></div><div class="pt-col-cr">' + (BLP[4]||12) + '</div><div class="pt-col-ca">$' + (Math.round((BLP[4]||12)*bpl*100)/100).toFixed(2) + '</div></div>';
+    html += '<div class="pt-row"><div class="pt-col-sym"><span style="font-size:11px;letter-spacing:2px">B O N</span></div><div class="pt-col-cr">' + (BLP[3]||4) + '</div><div class="pt-col-ca">$' + (Math.round((BLP[3]||4)*bpl*100)/100).toFixed(2) + '</div></div>';
+    html += '<div class="pt-row"><div class="pt-col-sym"><span style="font-size:11px;letter-spacing:2px">B O</span></div><div class="pt-col-cr">' + (BLP[2]||5) + '</div><div class="pt-col-ca">$' + (Math.round((BLP[2]||5)*bpl*100)/100).toFixed(2) + '</div></div>';
+    html += '<div class="pt-row"><div class="pt-col-sym"><span style="font-size:11px;letter-spacing:2px">B</span></div><div class="pt-col-cr">' + (BLP[1]||2) + '</div><div class="pt-col-ca">$' + (Math.round((BLP[1]||2)*bpl*100)/100).toFixed(2) + '</div></div>';
     html += '</div>';
     html += '<div class="pt-section-note">JACKPOTS — ANY ACTIVE PAYLINE</div>';
     html += '<div class="pt-jp-row"><span class="pt-jp-mini">MINI</span><span>5 Sasha on any active payline</span></div>';
@@ -1054,18 +1198,6 @@ window.addEventListener('popstate', function(e) {
     }
   });
 
-  var _ab=$('auto-btn'); if(_ab) _ab.addEventListener('click', function() {
-    if (autoRemaining > 0) { stopAuto(); return; }
-    autoRemaining    = GameState.operator.autoPlaySpins || 10;
-    autoStartBalance = GameState.balance;
-    updateAutoBtn(); doSpin();
-  });
-  function stopAuto() { autoRemaining=0; updateAutoBtn(); }
-  function updateAutoBtn() {
-    var btn=$('auto-btn'); if(!btn) return;
-    btn.textContent = autoRemaining>0 ? 'STOP (' + autoRemaining + ')' : 'AUTO';
-    btn.classList.toggle('active', autoRemaining>0);
-  }
 
   // ── LOG TABS ──────────────────────────────────────────────────────
   document.querySelectorAll('.log-tab').forEach(function(tab) {
@@ -1085,5 +1217,27 @@ window.addEventListener('popstate', function(e) {
   setInterval(function() { UI.updateJackpotMeters(); }, 4000);
 })();
 </script>
+
+<!-- ── HOLD & SPIN BONUS WIN OVERLAY ─────────────────────────────────── -->
+<div id="hs-bonus-win-overlay">
+  <div id="hs-coin-rain"></div>
+  <div id="hs-bonus-win-content">
+    <div id="hs-bonus-win-label">BONUS WIN</div>
+    <div id="hs-bonus-win-amt">$0.00</div>
+    <div id="hs-bonus-win-tap">TAP TO CONTINUE</div>
+  </div>
+</div>
+
+<!-- ── RED SPIN BONUS WIN OVERLAY ─────────────────────────────────── -->
+<div id="rs-bonus-win-overlay">
+  <div id="rs-coin-rain"></div>
+  <div id="rs-bonus-win-content">
+    <div id="rs-bonus-win-label">🔴 RED SPIN BONUS</div>
+    <div id="rs-bonus-win-amt">$0.00</div>
+    <div id="rs-bonus-win-spins">0 SPINS</div>
+    <div id="rs-bonus-win-tap">TAP TO CONTINUE</div>
+  </div>
+</div>
+
 </body>
 </html>

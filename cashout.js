@@ -6,7 +6,7 @@
  * NOT redeemable for real cash — entertainment purposes only.
  */
 
-const CashOut = (() => {
+const CashOut = (function() {
   const CASINO_NAME   = 'Lucky Bitches Casino';
   const VOUCHER_KEY   = 'turrelleSisters_vouchers_v1';
   const VOUCHER_PREFIX= 'LBC';
@@ -41,9 +41,9 @@ const CashOut = (() => {
   }
 
   function formatTimestamp(ts) {
-    const d = new Date(ts);
-    const pad = n => String(n).padStart(2,'0');
-    return `${pad(d.getMonth()+1)}/${pad(d.getDate())}/${String(d.getFullYear()).slice(-2)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    var d = new Date(ts);
+    function pad(n) { return String(n).padStart(2,'0'); }
+    return pad(d.getMonth()+1)+'/'+pad(d.getDate())+'/'+String(d.getFullYear()).slice(-2)+' '+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
   }
 
   // ── CASH OUT ───────────────────────────────────────────────────────
@@ -172,25 +172,26 @@ const CashOut = (() => {
 
   // ── INSERT CASH ────────────────────────────────────────────────────
   function doInsertCash() {
-    const vouchers = loadVouchers().filter(v => v.status === 'active');
+    var vouchers = loadVouchers().filter(function(v) { return v.status === 'active'; });
     showWalletModal(vouchers);
   }
 
   function redeemVoucher(voucherId) {
-    const vouchers = loadVouchers();
-    const idx = vouchers.findIndex(v => v.id === voucherId && v.status === 'active');
+    var vouchers = loadVouchers();
+    var idx = -1;
+    for (var ri = 0; ri < vouchers.length; ri++) {
+      if (vouchers[ri].id === voucherId && vouchers[ri].status === 'active') { idx = ri; break; }
+    }
     if (idx < 0) { UI.showToast('Voucher not found or already used.'); return; }
 
-    const voucher = vouchers[idx];
-    voucher.status    = 'redeemed';
+    var voucher = vouchers[idx];
+    voucher.status     = 'redeemed';
     voucher.redeemedAt = Date.now();
     saveVouchers(vouchers);
 
-    // Add to balance
     GameState.balance += voucher.amount;
     saveState();
 
-    // Log event
     logEvent('CASH_IN', {
       bonusType:    'CASH_IN',
       voucherId:    voucher.id,
@@ -200,30 +201,28 @@ const CashOut = (() => {
     });
 
     if (typeof UI !== 'undefined') UI.updateBalance(GameState.balance);
-
     hideWalletModal();
     if (typeof UI !== 'undefined') UI.stopInsertCashTicker();
-
-    UI.showToast(`💳 $${voucher.amount.toFixed(2)} loaded — Good Luck!`, 2500);
-    Audio && Audio.play('win_small');
+    UI.showToast('💳 $' + voucher.amount.toFixed(2) + ' loaded — Good Luck!', 2500);
+    if (typeof Audio !== 'undefined') Audio.play('win_small');
   }
 
   // ── ZERO BALANCE FLASH ─────────────────────────────────────────────
   function startZeroBalanceFlash() {
     stopZeroBalanceFlash();
     _flashMessage();
-    insertCashFlashInterval = setInterval(() => {
+    insertCashFlashInterval = setInterval(function() {
       if (GameState.balance <= 0) _flashMessage();
       else stopZeroBalanceFlash();
     }, 5000);
   }
 
   function _flashMessage() {
-    const el = document.getElementById('zero-balance-msg');
+    var el = document.getElementById('zero-balance-msg');
     if (!el) return;
     el.classList.add('visible');
     clearTimeout(insertCashFlashTimer);
-    insertCashFlashTimer = setTimeout(() => el.classList.remove('visible'), 2500);
+    insertCashFlashTimer = setTimeout(function() { el.classList.remove('visible'); }, 2500);
   }
 
   function stopZeroBalanceFlash() {
@@ -250,15 +249,14 @@ const CashOut = (() => {
     const serialEl = document.getElementById('vm-serial');
     if (serialEl) serialEl.textContent = voucher.serialNumber || '---';
 
-    // Generate simple barcode-style visual
-    const bars = document.getElementById('vm-barcode');
+    var bars = document.getElementById('vm-barcode');
     if (bars) {
       bars.innerHTML = '';
-      const seed = voucher.id.split('').reduce((a,c) => a + c.charCodeAt(0), 0);
-      for (let i = 0; i < 40; i++) {
-        const bar = document.createElement('div');
-        const w = ((seed * (i+7) * 13) % 3) + 1;
-        bar.style.cssText = `display:inline-block;width:${w}px;height:40px;background:#000;margin:0 0.5px;vertical-align:top;`;
+      var seed = voucher.id.split('').reduce(function(a,c) { return a + c.charCodeAt(0); }, 0);
+      for (var bi = 0; bi < 40; bi++) {
+        var bar = document.createElement('div');
+        var w = ((seed * (bi+7) * 13) % 3) + 1;
+        bar.style.cssText = 'display:inline-block;width:'+w+'px;height:40px;background:#000;margin:0 0.5px;vertical-align:top;';
         bars.appendChild(bar);
       }
     }
@@ -267,7 +265,8 @@ const CashOut = (() => {
   }
 
   function hideVoucherModal() {
-    document.getElementById('voucher-modal')?.classList.remove('active');
+    var _vm = document.getElementById('voucher-modal');
+    if (_vm) _vm.classList.remove('active');
   }
 
   // ── WALLET MODAL ───────────────────────────────────────────────────
@@ -281,17 +280,16 @@ const CashOut = (() => {
     if (vouchers.length === 0) {
       listEl.innerHTML = '<div class="wallet-empty">No vouchers in wallet.<br><span>Cash out during a session to create vouchers.</span></div>';
     } else {
-      vouchers.forEach(v => {
-        const row = document.createElement('div');
+      vouchers.forEach(function(v) {
+        var row = document.createElement('div');
         row.className = 'wallet-row';
-        row.innerHTML = `
-          <div class="wallet-info">
-            <div class="wallet-id">${v.id}</div>
-            <div class="wallet-date">${v.issuedStr}</div>
-          </div>
-          <div class="wallet-amount">$${v.amount.toFixed(2)}</div>
-          <button class="wallet-use-btn" onclick="CashOut.redeemVoucher('${v.id}')">INSERT</button>
-        `;
+        row.innerHTML =
+          '<div class="wallet-info">' +
+            '<div class="wallet-id">' + v.id + '</div>' +
+            '<div class="wallet-date">' + v.issuedStr + '</div>' +
+          '</div>' +
+          '<div class="wallet-amount">$' + v.amount.toFixed(2) + '</div>' +
+          '<button class="wallet-use-btn" onclick="CashOut.redeemVoucher(\'' + v.id + '\')">INSERT</button>';
         listEl.appendChild(row);
       });
     }
@@ -300,41 +298,41 @@ const CashOut = (() => {
   }
 
   function hideWalletModal() {
-    document.getElementById('wallet-modal')?.classList.remove('active');
+    var _wm = document.getElementById('wallet-modal');
+    if (_wm) _wm.classList.remove('active');
   }
 
   // ── INIT ───────────────────────────────────────────────────────────
   function init() {
-    // Wire Cash Out button
-    document.getElementById('cashout-btn')?.addEventListener('click', doCashOut);
-
-    // Wire Insert Cash button
-    document.getElementById('insertcash-btn')?.addEventListener('click', doInsertCash);
-
-    // Wire Create Voucher button
-    document.getElementById('create-voucher-btn')?.addEventListener('click', doCreateVoucher);
-
-    // Wire Create Voucher modal
-    document.getElementById('cv-confirm')?.addEventListener('click', confirmCreateVoucher);
-    document.getElementById('cv-cancel')?.addEventListener('click',  hideCreateVoucherModal);
-
-    // Wire voucher modal close
-    document.getElementById('vm-close')?.addEventListener('click', hideVoucherModal);
-    document.getElementById('vm-print')?.addEventListener('click', () => {
+    var _cb = document.getElementById('cashout-btn');
+    if (_cb) _cb.addEventListener('click', doCashOut);
+    var _icb = document.getElementById('insertcash-btn');
+    if (_icb) _icb.addEventListener('click', doInsertCash);
+    var _cvc = document.getElementById('create-voucher-btn');
+    if (_cvc) _cvc.addEventListener('click', doCreateVoucher);
+    var _cvconf = document.getElementById('cv-confirm');
+    if (_cvconf) _cvconf.addEventListener('click', confirmCreateVoucher);
+    var _cvcan = document.getElementById('cv-cancel');
+    if (_cvcan) _cvcan.addEventListener('click', hideCreateVoucherModal);
+    var _vmc = document.getElementById('vm-close');
+    if (_vmc) _vmc.addEventListener('click', hideVoucherModal);
+    var _vmp = document.getElementById('vm-print');
+    if (_vmp) _vmp.addEventListener('click', function() {
       hideVoucherModal();
       UI.showToast('Voucher saved to wallet ✓', 2000);
     });
-
-    // Wire wallet modal close
-    document.getElementById('wallet-close')?.addEventListener('click', hideWalletModal);
+    var _wc = document.getElementById('wallet-close');
+    if (_wc) _wc.addEventListener('click', hideWalletModal);
 
     // Clear ALL stale overlay/modal states from previous session
-    // This prevents any full-screen overlay from blocking the game on reload
-    const staleOverlays = [
+    var staleOverlays = [
       'voucher-modal', 'wallet-modal', 'jackpot-overlay',
       'hold-screen', 'pick-screen', 'op-overlay', 'pin-overlay', 'log-screen',
     ];
-    staleOverlays.forEach(id => document.getElementById(id)?.classList.remove('active'));
+    staleOverlays.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.remove('active');
+    });
   }
 
   return {

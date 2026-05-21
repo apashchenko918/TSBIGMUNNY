@@ -5,7 +5,9 @@
  * Every balance change, jackpot change, and spin result is saved immediately.
  */
 
-const STATE_KEY = 'turrelleSisters_v1';
+const STATE_KEY   = 'turrelleSisters_v1';
+const HISTORY_KEY = 'turrelle_game_history'; // Phase L — persistent spin history
+const HISTORY_MAX = 10000;                   // max records; fails gracefully if storage full
 
 // ═══════════════════════════════════════════════════════════════════════
 // GAME STATE — single source of truth for all mutable game data
@@ -27,10 +29,10 @@ const GameState = {
 
   // ── Progressive jackpots ──────────────────────────────────────────
   jackpots: {
-    MINI:  { current: JACKPOT_CONFIG.MINI.seed,  seed: JACKPOT_CONFIG.MINI.seed  },
-    MINOR: { current: JACKPOT_CONFIG.MINOR.seed, seed: JACKPOT_CONFIG.MINOR.seed },
-    MAJOR: { current: JACKPOT_CONFIG.MAJOR.seed, seed: JACKPOT_CONFIG.MAJOR.seed },
-    GRAND: { current: JACKPOT_CONFIG.GRAND.seed, seed: JACKPOT_CONFIG.GRAND.seed },
+    MINI:  { current: JACKPOT_CONFIG.MINI.seed,  seed: JACKPOT_CONFIG.MINI.seed,  mustHitBy: JACKPOT_CONFIG.MINI.seed  * (JACKPOT_MHB_MULTIPLIERS ? JACKPOT_MHB_MULTIPLIERS.MINI  : 3) },
+    MINOR: { current: JACKPOT_CONFIG.MINOR.seed, seed: JACKPOT_CONFIG.MINOR.seed, mustHitBy: JACKPOT_CONFIG.MINOR.seed * (JACKPOT_MHB_MULTIPLIERS ? JACKPOT_MHB_MULTIPLIERS.MINOR : 4) },
+    MAJOR: { current: JACKPOT_CONFIG.MAJOR.seed, seed: JACKPOT_CONFIG.MAJOR.seed, mustHitBy: JACKPOT_CONFIG.MAJOR.seed * (JACKPOT_MHB_MULTIPLIERS ? JACKPOT_MHB_MULTIPLIERS.MAJOR : 5) },
+    GRAND: { current: JACKPOT_CONFIG.GRAND.seed, seed: JACKPOT_CONFIG.GRAND.seed, mustHitBy: JACKPOT_CONFIG.GRAND.seed * (JACKPOT_MHB_MULTIPLIERS ? JACKPOT_MHB_MULTIPLIERS.GRAND : 6) },
   },
 
   // ── Session statistics (for live RTP tracker) ─────────────────────
@@ -43,8 +45,9 @@ const GameState = {
     redSpinCount:      0,
     holdSpinCount:     0,
     pickChooseCount:   0,
+    bonusFeatureCount: 0,
     jackpotWins:       { MINI:0, MINOR:0, MAJOR:0, GRAND:0 },
-    sessionStart:      null,
+    sessionStart:      Date.now(),
   },
 
   // ── Operator settings (persist across sessions) ───────────────────
@@ -55,13 +58,13 @@ const GameState = {
     bonusFrequencyMultiplier: 1.0,
     redSpinContinuance:       RED_SPIN_CONTINUANCE_DEFAULT,
     redSpinFrequency:         RED_SPIN_FREQUENCY_DEFAULT,
+    bonusFeatureFrequency:    (typeof BONUS_FEATURE_FREQ_DEFAULT !== 'undefined' ? BONUS_FEATURE_FREQ_DEFAULT : 0.0067),
     maxWinPerSpin:            0,      // 0 = no cap
     startingBalance:          DEFAULT_BALANCE,
-    autoPlayEnabled:          false,
-    autoPlaySpins:            0,
-    autoPlayLossLimit:        0,
-    autoPlayWinLimit:         0,
     panelOpen:                false,
+    comboArmed:               false,
+    comboBonus:               'hold_spin',
+    comboJP:                  'MINI',
     // Force triggers (reset after use)
     forceFreeSpins:           false,
     forceBonusGame:           false,
@@ -70,8 +73,8 @@ const GameState = {
     forceJackpot:             'none', // 'none'|'MINI'|'MINOR'|'MAJOR'|'GRAND'
     forceJackpotContext:      'bonus', // 'bonus'|'base'
     forceReelStops:           [null, null, null, null, null],
-    disablePickChooseInRedSpin: false,  // Disable Pick & Choose during red spin
-    disableHoldSpinInRedSpin:   false,  // Disable Hold & Spin during red spin
+    disablePickChooseInRedSpin: true,   // P&C cannot trigger during Red Spin (owner-confirmed 2026-05-19)
+    disableHoldSpinInRedSpin:   true,   // H&S cannot trigger during Red Spin (owner-confirmed 2026-05-19)
   },
 
   // ── Event log & replay ────────────────────────────────────────────
@@ -81,6 +84,10 @@ const GameState = {
     currentGame: null, // Game being built during active spin
     gameCounter: 0,    // Monotonic game ID counter
   },
+
+  // ── Persistent spin history (Phase L) ─────────────────────────────
+  // Stored separately in HISTORY_KEY — survives sessions, up to HISTORY_MAX records
+  spinHistory: [],
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -97,7 +104,7 @@ function saveState() {
       lastCreditsPerLine: GameState.lastCreditsPerLine,
       jackpots:   GameState.jackpots,
       stats:      GameState.stats,
-      operator:   { ...GameState.operator, panelOpen: false }, // Never save panel as open
+      operator:   Object.assign({}, GameState.operator, { panelOpen: false }), // Never save panel as open
       eventLog: {
         allEvents:   GameState.eventLog.allEvents,
         games:       GameState.eventLog.games,
@@ -126,10 +133,17 @@ function loadState() {
     // Restore jackpots (critical — must survive reload)
     // Note: seeds are re-applied from denom table after load in initGame()
     if (saved.jackpots) {
-      Object.keys(GameState.jackpots).forEach(key => {
+      Object.keys(GameState.jackpots).forEach(function(key) {
         if (saved.jackpots[key]) {
-          GameState.jackpots[key].current = saved.jackpots[key].current;
-          GameState.jackpots[key].seed    = saved.jackpots[key].seed;
+          GameState.jackpots[key].current    = saved.jackpots[key].current;
+          GameState.jackpots[key].seed       = saved.jackpots[key].seed;
+          // Restore mustHitBy if saved; otherwise recalc from seed
+          if (saved.jackpots[key].mustHitBy != null) {
+            GameState.jackpots[key].mustHitBy = saved.jackpots[key].mustHitBy;
+          } else {
+            var mhbMult = JACKPOT_MHB_MULTIPLIERS ? (JACKPOT_MHB_MULTIPLIERS[key] || 4) : 4;
+            GameState.jackpots[key].mustHitBy = GameState.jackpots[key].seed * mhbMult;
+          }
         }
       });
     }
@@ -147,7 +161,9 @@ function loadState() {
       if (saved.eventLog.gameCounter) GameState.eventLog.gameCounter = saved.eventLog.gameCounter;
     }
 
-    console.log(`[State] Restored — Balance: $${GameState.balance.toFixed(2)}`);
+    loadSpinHistory(); // Phase L — load persistent spin history separately
+    GameState.stats.sessionStart = Date.now(); // Always reset session timer on page load
+    console.log('[State] Restored — Balance: $' + GameState.balance.toFixed(2));
     return true;
   } catch (e) {
     console.warn('State load failed:', e);
@@ -155,13 +171,12 @@ function loadState() {
   }
 }
 
-function resetState(options = {}) {
-  const {
-    keepJackpots  = false,
-    keepStats     = false,
-    keepOperator  = true,
-    newBalance    = GameState.operator.startingBalance,
-  } = options;
+function resetState(options) {
+  if (options === undefined) options = {};
+  var keepJackpots = (options.keepJackpots !== undefined) ? options.keepJackpots : false;
+  var keepStats    = (options.keepStats    !== undefined) ? options.keepStats    : false;
+  var keepOperator = (options.keepOperator !== undefined) ? options.keepOperator : true;
+  var newBalance   = (options.newBalance   !== undefined) ? options.newBalance   : GameState.operator.startingBalance;
 
   GameState.balance   = newBalance;
   GameState.lastBet   = DEFAULT_BET;
@@ -171,7 +186,7 @@ function resetState(options = {}) {
   GameState.bonusState     = null;
 
   if (!keepJackpots) {
-    Object.keys(GameState.jackpots).forEach(key => {
+    Object.keys(GameState.jackpots).forEach(function(key) {
       GameState.jackpots[key].current = GameState.jackpots[key].seed;
     });
   }
@@ -180,10 +195,11 @@ function resetState(options = {}) {
     GameState.stats = {
       totalWagered: 0, totalWon: 0, totalSpins: 0,
       biggestWin: 0, biggestWinDetail: null,
-      redSpinCount: 0, holdSpinCount: 0, pickChooseCount: 0,
+      redSpinCount: 0, holdSpinCount: 0, pickChooseCount: 0, bonusFeatureCount: 0,
       jackpotWins: { MINI:0, MINOR:0, MAJOR:0, GRAND:0 },
       sessionStart: Date.now(),
     };
+    clearSpinHistory(); // Full reset also clears audit history
   }
 
   GameState.eventLog = {
@@ -205,7 +221,7 @@ function resetState(options = {}) {
 
 // Reset only jackpots (operator panel action)
 function resetJackpotValues() {
-  Object.keys(GameState.jackpots).forEach(key => {
+  Object.keys(GameState.jackpots).forEach(function(key) {
     GameState.jackpots[key].current = GameState.jackpots[key].seed;
   });
   saveState();
@@ -225,7 +241,7 @@ function resetSingleJackpot(key) {
 function contributeToJackpots(totalBet) {
   const rate = GameState.operator.jackpotContribution;
   const pool = totalBet * rate;
-  Object.keys(GameState.jackpots).forEach(key => {
+  Object.keys(GameState.jackpots).forEach(function(key) {
     GameState.jackpots[key].current += pool * JACKPOT_SPLIT[key];
   });
   saveState();
@@ -258,7 +274,7 @@ function startGameRecord(bet) {
   const g = GameState.eventLog;
   g.gameCounter++;
   g.currentGame = {
-    gameId:        `game_${String(g.gameCounter).padStart(4,'0')}`,
+    gameId:        'game_' + String(g.gameCounter).padStart(4,'0'),
     gameNumber:    g.gameCounter,
     timestamp:     Date.now(),
     timeFormatted: formatTimestamp(Date.now()),
@@ -271,17 +287,18 @@ function startGameRecord(bet) {
   };
 }
 
-function logEvent(type, data = {}) {
-  const g   = GameState.eventLog;
-  const now = Date.now();
-  const evt = {
-    id:            `evt_${now}_${g.allEvents.length}`,
-    type,
+function logEvent(type, data) {
+  if (data === undefined) data = {};
+  var g   = GameState.eventLog;
+  var now = Date.now();
+  var evt = {
+    id:            'evt_' + now + '_' + g.allEvents.length,
+    type:          type,
     timestamp:     now,
     timeFormatted: formatTimestamp(now),
-    gameId:        g.currentGame?.gameId || 'system',
-    ...data,
+    gameId:        (g.currentGame && g.currentGame.gameId) ? g.currentGame.gameId : 'system',
   };
+  Object.assign(evt, data);
 
   g.allEvents.push(evt);
   if (g.allEvents.length > 500) g.allEvents.shift();
@@ -298,7 +315,100 @@ function finalizeGameRecord(summary) {
   g.games.unshift(game);          // Newest first
   if (g.games.length > 10) g.games.pop();  // Keep last 10 only
   g.currentGame = null;
+
+  // Phase L — persist to long-term history (separate key, up to 10,000 records)
+  recordSpinHistory(game);
+
   saveState();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE L — PERSISTENT SPIN HISTORY
+// Stored in separate localStorage key (HISTORY_KEY) — never mixed with STATE_KEY.
+// recordSpinHistory() is called from finalizeGameRecord() automatically.
+// ═══════════════════════════════════════════════════════════════════════
+
+function loadSpinHistory() {
+  try {
+    var raw = localStorage.getItem(HISTORY_KEY);
+    GameState.spinHistory = raw ? JSON.parse(raw) : [];
+  } catch(e) {
+    console.warn('[History] Load failed:', e);
+    GameState.spinHistory = [];
+  }
+}
+
+function recordSpinHistory(gameRecord) {
+  if (!Array.isArray(GameState.spinHistory)) GameState.spinHistory = [];
+  GameState.spinHistory.unshift(gameRecord); // newest first
+  if (GameState.spinHistory.length > HISTORY_MAX) {
+    GameState.spinHistory = GameState.spinHistory.slice(0, HISTORY_MAX);
+  }
+  // Graceful storage failure — trim until it fits
+  var saved = false;
+  while (!saved && GameState.spinHistory.length > 0) {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(GameState.spinHistory));
+      saved = true;
+    } catch(e) {
+      GameState.spinHistory.pop(); // remove oldest until it fits
+    }
+  }
+}
+
+function clearSpinHistory() {
+  GameState.spinHistory = [];
+  try { localStorage.removeItem(HISTORY_KEY); } catch(e) {}
+}
+
+function exportHistoryCSV() {
+  var headers = ['spin','timestamp','denom','cpl','lines','total_bet',
+    'center_row','reel_stops','base_win','bonuses','bonus_win',
+    'jackpot_type','jackpot_amt','balance_before','balance_after','net'].join(',');
+  var rows = (GameState.spinHistory || []).map(function(g) {
+    var s  = g.summary || {};
+    var br = g.baseResult || {};
+    var bonusTypes = (g.bonuses || []).map(function(b){return b.type;}).join('|');
+    var bonusWin   = (s.totalWon || 0) - (br.totalWin || 0);
+    return [
+      g.gameNumber || '',
+      g.timeFormatted || '',
+      g.denom || '',
+      g.creditsPerLine || '',
+      (g.bet && g.bet.lines) || '20',
+      (g.bet && g.bet.total != null) ? g.bet.total.toFixed(2) : '',
+      (g.centerRow || []).join('-'),
+      (g.reelStops || []).join('-'),
+      (br.totalWin != null) ? br.totalWin.toFixed(2) : '0',
+      bonusTypes || 'none',
+      bonusWin.toFixed(2),
+      g.jackpotType || '',
+      (g.jackpotAmt != null) ? g.jackpotAmt.toFixed(2) : '',
+      (s.balanceBefore != null) ? s.balanceBefore.toFixed(2) : '',
+      (s.balanceAfter != null) ? s.balanceAfter.toFixed(2) : '',
+      (s.netResult != null) ? s.netResult.toFixed(2) : ''
+    ].map(function(v){ return '"' + String(v).replace(/"/g,'""') + '"'; }).join(',');
+  });
+  _downloadFile(
+    'turrelle_history_' + Date.now() + '.csv',
+    [headers].concat(rows).join('\n'),
+    'text/csv'
+  );
+}
+
+function exportHistoryJSON() {
+  var data = {
+    exportedAt:  formatTimestamp(Date.now()),
+    version:     '2.0',
+    totalRecords: (GameState.spinHistory || []).length,
+    stats:       GameState.stats,
+    history:     GameState.spinHistory || [],
+  };
+  _downloadFile(
+    'turrelle_history_' + Date.now() + '.json',
+    JSON.stringify(data, null, 2),
+    'application/json'
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -326,7 +436,7 @@ function getSessionDuration() {
   const h    = Math.floor(ms / 3600000);
   const m    = Math.floor((ms % 3600000) / 60000);
   const sec  = Math.floor((ms % 60000) / 1000);
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -334,24 +444,28 @@ function getSessionDuration() {
 // ═══════════════════════════════════════════════════════════════════════
 
 function exportLogAsCSV() {
-  const headers = ['EventID','Type','Timestamp','GameID','BetTotal','TotalWin','NetResult','BalanceAfter','BonusType'];
-  const rows = GameState.eventLog.allEvents.map(e => [
-    e.id, e.type, e.timeFormatted, e.gameId,
-    e.bet?.total ?? '', e.totalWin ?? '', e.netResult ?? '',
-    e.balanceAfter ?? '', e.bonusType ?? ''
-  ].map(v => `"${v}"`).join(','));
-  _downloadFile(`turrelle_log_${Date.now()}.csv`, [headers.join(','), ...rows].join('\n'), 'text/csv');
+  var headers = ['EventID','Type','Timestamp','GameID','BetTotal','TotalWin','NetResult','BalanceAfter','BonusType'];
+  var rows = GameState.eventLog.allEvents.map(function(e) {
+    var betTotal    = (e.bet && e.bet.total != null) ? e.bet.total : '';
+    var totalWin    = (e.totalWin   != null) ? e.totalWin   : '';
+    var netResult   = (e.netResult  != null) ? e.netResult  : '';
+    var balAfter    = (e.balanceAfter != null) ? e.balanceAfter : '';
+    var bonusType   = (e.bonusType  != null) ? e.bonusType  : '';
+    return [e.id, e.type, e.timeFormatted, e.gameId, betTotal, totalWin, netResult, balAfter, bonusType]
+      .map(function(v) { return '"' + v + '"'; }).join(',');
+  });
+  _downloadFile('turrelle_log_' + Date.now() + '.csv', [headers.join(',')].concat(rows).join('\n'), 'text/csv');
 }
 
 function exportLogAsJSON() {
-  const data = {
+  var data = {
     exportedAt:  formatTimestamp(Date.now()),
     version:     '1.0',
     stats:       GameState.stats,
     last10Games: GameState.eventLog.games,
     allEvents:   GameState.eventLog.allEvents,
   };
-  _downloadFile(`turrelle_log_${Date.now()}.json`, JSON.stringify(data, null, 2), 'application/json');
+  _downloadFile('turrelle_log_' + Date.now() + '.json', JSON.stringify(data, null, 2), 'application/json');
 }
 
 function _downloadFile(filename, content, mime) {

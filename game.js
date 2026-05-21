@@ -1,23 +1,23 @@
 'use strict';
 /**
  * game.js — The Turrelle Sisters Big Munny v10
+ * ES5 rewrite v6l95 — removed class, const, let, arrow functions, for...of
  */
 
-class RNG {
-  constructor() { this._buf = new Uint32Array(64); this._index = 64; }
-  _refill() { crypto.getRandomValues(this._buf); this._index = 0; }
-  next() { if (this._index >= this._buf.length) this._refill(); return this._buf[this._index++] / 0x100000000; }
-  nextInt(min, max) { return Math.floor(this.next() * (max - min + 1)) + min; }
-  chance(p) { return this.next() < p; }
-}
-const rng = new RNG();
+// ── RNG (crypto-backed, cryptographically secure) ────────────────────
+function RNG() { this._buf = new Uint32Array(64); this._index = 64; }
+RNG.prototype._refill = function() { crypto.getRandomValues(this._buf); this._index = 0; };
+RNG.prototype.next    = function() { if (this._index >= this._buf.length) this._refill(); return this._buf[this._index++] / 0x100000000; };
+RNG.prototype.nextInt = function(min, max) { return Math.floor(this.next() * (max - min + 1)) + min; };
+RNG.prototype.chance  = function(p) { return this.next() < p; };
+var rng = new RNG();
 
 // ── CURRENT SPIN SERIAL ──────────────────────────────────────────────
-let _currentSpinSerial = '';
+var _currentSpinSerial = '';
 
 function generateReelStops() {
-  const forced = GameState.operator.forceReelStops;
-  return REEL_STRIPS.map((strip, r) => {
+  var forced = GameState.operator.forceReelStops;
+  return REEL_STRIPS.map(function(strip, r) {
     if (forced[r] !== null && forced[r] !== undefined) {
       return Math.max(0, Math.min(strip.length - 1, forced[r]));
     }
@@ -26,7 +26,7 @@ function generateReelStops() {
 }
 
 function getVisibleSymbols(reelIndex, stopPosition) {
-  const strip = REEL_STRIPS[reelIndex], len = strip.length;
+  var strip = REEL_STRIPS[reelIndex], len = strip.length;
   return [
     strip[(stopPosition - 1 + len) % len],
     strip[stopPosition],
@@ -35,412 +35,285 @@ function getVisibleSymbols(reelIndex, stopPosition) {
 }
 
 function buildGrid(stops) {
-  return stops.map((stop, r) => getVisibleSymbols(r, stop));
+  return stops.map(function(stop, r) { return getVisibleSymbols(r, stop); });
 }
 
 // ── WIN EVALUATION ───────────────────────────────────────────────────
 function evaluateLine(lineSymbols, betPerLine) {
-  let wildCount = 0, matchSymbol = null;
-  for (let i = 0; i < lineSymbols.length; i++) {
-    if (WILD_IDS.includes(lineSymbols[i])) wildCount++;
+  var wildCount = 0, matchSymbol = null;
+  for (var i = 0; i < lineSymbols.length; i++) {
+    if (WILD_IDS.indexOf(lineSymbols[i]) >= 0) wildCount++;
     else { matchSymbol = lineSymbols[i]; break; }
   }
   if (matchSymbol === null && wildCount > 0) { matchSymbol = SYMBOLS.JOSIE.id; wildCount = 0; }
 
-  let matchCount = wildCount, extraWilds = 0;
-  for (let i = wildCount; i < lineSymbols.length; i++) {
-    if (lineSymbols[i] === matchSymbol) matchCount++;
-    else if (WILD_IDS.includes(lineSymbols[i])) { matchCount++; extraWilds++; }
+  var matchCount = wildCount, extraWilds = 0;
+  for (var j = wildCount; j < lineSymbols.length; j++) {
+    if (lineSymbols[j] === matchSymbol) matchCount++;
+    else if (WILD_IDS.indexOf(lineSymbols[j]) >= 0) { matchCount++; extraWilds++; }
     else break;
   }
-  if (matchCount < 2) return { amount: 0 };
 
-  // Gold Coins never pay on paylines — only trigger Hold & Spin at 6+
+  if (matchCount < 2) return { amount: 0 };
   if (matchSymbol === BONUS_ID) return { amount: 0 };
 
-  const symbolKey = Object.keys(SYMBOLS).find(k => SYMBOLS[k].id === matchSymbol);
+  var symbolKey = null;
+  var keys = Object.keys(SYMBOLS);
+  for (var ki = 0; ki < keys.length; ki++) {
+    if (SYMBOLS[keys[ki]].id === matchSymbol) { symbolKey = keys[ki]; break; }
+  }
   if (!symbolKey || !PAY_TABLE[symbolKey]) return { amount: 0 };
-  const pays = PAY_TABLE[symbolKey];
-  const payIndex = Math.max(0, 5 - matchCount);
+
+  var pays     = PAY_TABLE[symbolKey];
+  var payIndex = Math.max(0, 5 - matchCount);
   if (payIndex >= pays.length) return { amount: 0 };
-  const basePay = pays[payIndex];
+  var basePay  = pays[payIndex];
   if (basePay === 0) return { amount: 0 };
 
-  // FIX: Identity-based wild multiplier — check WHICH wilds are in combo, not just count
-  // Sasha alone (any count) = ×2 | Josie alone = ×4 | Both together = ×6
-  // Scan the full combo window (leading wilds + body of matchCount symbols)
-  const wildIdsInCombo = lineSymbols.slice(0, matchCount + extraWilds).filter(s => WILD_IDS.includes(s));
-  const hasJosie = wildIdsInCombo.includes(SYMBOLS.JOSIE.id);
-  const hasSasha = wildIdsInCombo.includes(SYMBOLS.SASHA.id);
-  let multiplier = 1;
-  if (wildIdsInCombo.length > 0) {
-    if (hasJosie && hasSasha) multiplier = 6;
-    else if (hasJosie)        multiplier = 4;
-    else                      multiplier = 2; // Sasha only
-  }
-  const totalWildsInCombo = wildIdsInCombo.length;
+  // Wild multiplier — owner confirmed 2026-05-20 (v6l96)
+  // Additive per wild in the winning combo:
+  //   Josie contributes ×2, Sasha contributes ×1
+  //   Total = (josieCount × 2) + (sashaCount × 1), minimum ×1
+  // Examples: 0 wilds=×1, 1S=×1, 1J=×2, 1J+1S=×3, 2J=×4, 2J+1S=×5, 2J+2S=×6
+  // RULE: Multiplier applies to regular payline pays only.
+  //       Jackpots always pay their fixed progressive seed regardless of wilds.
+  //       Same rule applies in Red Spin bonus (uses same evaluateLine).
+  var wildIdsInCombo = lineSymbols.slice(0, matchCount + extraWilds).filter(function(s) { return WILD_IDS.indexOf(s) >= 0; });
+  var josieCount = wildIdsInCombo.filter(function(id) { return id === SYMBOLS.JOSIE.id; }).length;
+  var sashaCount = wildIdsInCombo.filter(function(id) { return id === SYMBOLS.SASHA.id; }).length;
+  var multiplier = Math.max(1, josieCount * 2 + sashaCount * 1);
 
-  return { amount: basePay * betPerLine * multiplier, symbolKey, count: matchCount, wildCount: totalWildsInCombo, multiplier, basePay };
+  return {
+    amount: basePay * betPerLine * multiplier,
+    symbolKey: symbolKey, count: matchCount,
+    wildCount: wildIdsInCombo.length, multiplier: multiplier, basePay: basePay,
+  };
 }
-// ── CHERRY SPECIAL EVALUATION ─────────────────────────────────────────
-// Pays on 1+ left-to-right starting reel 1, ANY row (not just paylines)
-// Cherry: 1+ consecutive from reel 1, ALL rows pay simultaneously (not best row only)
-// Returns { amount:total, wins:[{row,count,amount}] } for payline animation
-function evaluateCherryWin(grid, betPerLine, activeLinesCount) {
-  const cherryId   = SYMBOLS.CHERRY.id;
-  const cherryPays = PAY_TABLE.CHERRY;
-  let totalAmount = 0;
-  const wins = [];
-  for (let row = 0; row < 3; row++) {
-    let count = 0;
-    for (let col = 0; col < 5; col++) {
-      if (grid[col][row] === cherryId) { count++; }
-      else { break; }
-    }
-    if (count >= 1) {
-      const idx = count >= 5 ? 0 : count === 4 ? 1 : count === 3 ? 2 : 3;
-      const pay = (cherryPays[idx] || 0) * betPerLine;
-      if (pay > 0) {
-        totalAmount += pay;
-        wins.push({ row, count, amount: pay });
-      }
-    }
-  }
-  // Return best row for animation (highest count), total for balance
-  const best = wins.reduce((a,b) => b.count > a.count ? b : a, { row:-1, count:0, amount:0 });
-  return { amount: totalAmount, row: best.row, count: best.count, wins };
-}
-
-
 
 // ── BONUS LETTER EVALUATION ───────────────────────────────────────────
-// Checks each row for consecutive B-O-N-U-S letters starting from reel 1
-// Returns: { count, row, triggerBonus } — best row result
-function evaluateBonusLetters(grid) {
-  var bestCount = 0, bestRow = -1;
-  // Check each of the 3 rows
+// Phase M rework 2026-05-16 — cherry-style, all 3 rows, consecutive from reel 1
+function evaluateLetterPays(grid, betPerLine) {
+  var totalAmount = 0, wins = [];
   for (var row = 0; row < 3; row++) {
     var count = 0;
     for (var col = 0; col < 5; col++) {
-      var expectedId = LETTER_IDS[col]; // B=10 on col0, O=11 on col1, etc.
-      if (grid[col][row] === expectedId) {
-        count++;
-      } else {
-        break; // must be consecutive from reel 1
-      }
+      if (grid[col][row] === LETTER_IDS[col]) count++;
+      else break;
     }
-    if (count > bestCount) { bestCount = count; bestRow = row; }
+    if (count >= 1) {
+      var pay = (BONUS_LETTER_PAYS[count] || 0) * betPerLine;
+      if (pay > 0) { totalAmount += pay; wins.push({ row: row, count: count, amount: pay }); }
+    }
   }
-  return { count: bestCount, row: bestRow, triggerBonus: bestCount >= 5 };
+  var best = wins.reduce(function(a, b) { return b.count > a.count ? b : a; }, { row: -1, count: 0, amount: 0 });
+  return { amount: totalAmount, row: best.row, count: best.count, wins: wins };
 }
 
 // ── MIXED BAR EVALUATION ──────────────────────────────────────────────
-// 5 of Any Bar (any mix of Single/Double/Triple Bar) on any active payline
-// Only pays on 5 — no partial pay for 3 or 4
 function evaluateMixedBars(grid, activeLinesCount, betPerLine) {
-  // Mixed bar: 3,4,5 consecutive bars from reel 1 on active payline
-  // 3 any bar = 5× | 4 any bar = 15× | 5 any bar = 35× bet/line
-  // Wilds do NOT substitute. Pure same-bar 3/4/5-oak pays via normal paytable instead.
   var wins = [];
   var activeLines = PAYLINES.slice(0, activeLinesCount);
   activeLines.forEach(function(line, lineIndex) {
     var lineSyms = line.map(function(row, col) { return grid[col][row]; });
-
-    // Count consecutive bars from reel 1
     var barCount = 0;
     for (var i = 0; i < 5; i++) {
       if (BAR_IDS.indexOf(lineSyms[i]) >= 0) barCount++;
       else break;
     }
-    if (barCount < 3) return; // minimum 3 bars
-
-    // Check if it's a pure same-bar combo (triple/double/single all same type)
-    // Those are handled by regular payline evaluation — skip here
-    var allSame = true;
-    var firstBar = lineSyms[0];
-    for (var j = 1; j < barCount; j++) {
-      if (lineSyms[j] !== firstBar) { allSame = false; break; }
-    }
-    if (allSame) return; // pure same-bar pays via normal paytable
-
-    // Mixed bar win
+    if (barCount < 3) return;
+    var allSame = true, firstBar = lineSyms[0];
+    for (var j = 1; j < barCount; j++) { if (lineSyms[j] !== firstBar) { allSame = false; break; } }
+    if (allSame) return;
     var mixedPay = MIXED_BAR_PAY[barCount] || 0;
     if (mixedPay > 0) {
-      wins.push({
-        lineIndex: lineIndex, line: line,
-        amount:    mixedPay * betPerLine,
-        symbolKey: 'MIXED_BAR', count: barCount, isMixedBar: true,
-      });
+      wins.push({ lineIndex: lineIndex, line: line, amount: mixedPay * betPerLine, symbolKey: 'MIXED_BAR', count: barCount, isMixedBar: true });
     }
   });
   return wins;
 }
 
 function evaluateSpin(grid, activeLinesCount, betPerLine) {
-  const result = {
+  var result = {
     paylineWins: [], scatterCount: 0, bonusCount: 0,
     totalWin: 0, triggerPickChoose: false, triggerHoldSpin: false,
-    lipstickCount: 0,
+    lipstickCount: 0, scatterTriggered: false,
   };
 
-  let coinCount = 0;
-  grid.forEach(col => col.forEach(symId => {
-    if (symId === SCATTER_ID) result.scatterCount++;
-    if (symId === BONUS_ID)   coinCount++;
-  }));
+  var coinCount = 0, lipstickCount = 0;
+  for (var gc = 0; gc < grid.length; gc++) {
+    for (var gr = 0; gr < grid[gc].length; gr++) {
+      if (grid[gc][gr] === BONUS_PC_ID) lipstickCount++;
+      if (grid[gc][gr] === BONUS_ID)    coinCount++;
+    }
+  }
   result.bonusCount    = coinCount;
-  result.lipstickCount = result.scatterCount;
-  result.scatterTriggered = false; // Set below if 5-oak lipstick lands on any active payline
-
-  // Hold & Spin: 6+ gold coins anywhere in 15-position grid
+  result.lipstickCount = lipstickCount;
+  result.scatterCount  = lipstickCount;
   if (coinCount >= 6) result.triggerHoldSpin = true;
 
-  const activeLines = PAYLINES.slice(0, activeLinesCount);
-  activeLines.forEach((line, lineIndex) => {
-    const lineSymbols = line.map((row, col) => grid[col][row]);
-    // Skip lines with only Gold Coins (no value unless 6 trigger)
-    const win = evaluateLine(lineSymbols, betPerLine);
+  var activeLines = PAYLINES.slice(0, activeLinesCount);
+  activeLines.forEach(function(line, lineIndex) {
+    var lineSymbols = line.map(function(row, col) { return grid[col][row]; });
+    var win = evaluateLine(lineSymbols, betPerLine);
     if (win.amount > 0) {
-      result.paylineWins.push({ lineIndex, line, ...win });
+      result.paylineWins.push({
+        lineIndex: lineIndex, line: line,
+        lineName: (typeof PAYLINE_NAMES !== 'undefined' && PAYLINE_NAMES[lineIndex]) ? PAYLINE_NAMES[lineIndex] : ('Line ' + (lineIndex + 1)),
+        amount: win.amount, count: win.count, symbolKey: win.symbolKey,
+      });
       result.totalWin += win.amount;
-      // LIPSTICK PAYLINE RULE: 5 Lipstick on any active payline = Pick & Choose trigger
-      // The win has amount=0 per PAY_TABLE (5-oak pays 0 credits) but we still detect it
     }
-    // Separately check for 5-oak lipstick — pays 0 credits but triggers P&C
-    if (lineSymbols.every(id => id === SCATTER_ID)) {
+    if (lineIndex === 0 && lineSymbols.every(function(id) { return id === BONUS_PC_ID; })) {
       result.scatterTriggered = true;
     }
   });
 
-  // Cherry special evaluation — 1+ left-to-right any row
-  const cherryResult = evaluateCherryWin(grid, betPerLine, activeLinesCount);
-  if (cherryResult.amount > 0) {
-    // ALL rows pay simultaneously — add each winning row to paylineWins
-    var lineColors = [0, 1, 2]; // different colors per row
-    (cherryResult.wins || [{ row: cherryResult.row, count: cherryResult.count, amount: cherryResult.amount }]).forEach(function(cw, idx) {
-      if (cw.row < 0) return;
-      var cherryLine = [cw.row, cw.row, cw.row, cw.row, cw.row];
-      result.paylineWins.push({
-        lineIndex: lineColors[cw.row] || 0,
-        line:      cherryLine,
-        amount:    cw.amount,
-        symbolKey: 'CHERRY',
-        count:     cw.count,
-        isCherry:  true,
-      });
-    });
-    result.cherryWin = cherryResult.amount;
-    result.totalWin += cherryResult.amount;
-  }
-
-  // Mixed Bar evaluation — 5 any bar on any payline
   var mixedBarWins = evaluateMixedBars(grid, activeLinesCount, betPerLine);
-  mixedBarWins.forEach(function(win) {
-    result.paylineWins.push(win);
-    result.totalWin += win.amount;
-  });
+  mixedBarWins.forEach(function(win) { result.paylineWins.push(win); result.totalWin += win.amount; });
 
-  // BONUS letter evaluation — B-O-N-U-S consecutive same row
-  var letterResult = evaluateBonusLetters(grid);
-  if (letterResult.count >= 1) {
-    result.bonusLetterCount = letterResult.count;
+  var letterResult = evaluateLetterPays(grid, betPerLine);
+  if (letterResult.amount > 0) {
+    result.bonusLetterWin   = letterResult.amount;
     result.bonusLetterRow   = letterResult.row;
-    if (letterResult.count >= 5) {
-      result.triggerBonusFeature = true; // Full BONUS — triggers orb selection
-    } else {
-      // Partial pay
-      var letterPay = BONUS_LETTER_PAYS[letterResult.count] || 0;
-      if (letterPay > 0) {
-        result.bonusLetterWin = letterPay * betPerLine;
-        result.totalWin += result.bonusLetterWin;
-      }
+    result.bonusLetterWins  = letterResult.wins;
+    result.bonusLetterCount = letterResult.count;
+    result.totalWin += letterResult.amount;
+    var rowToPaylineIndex = { 0: 1, 1: 0, 2: 2 };
+    if (letterResult.wins) {
+      letterResult.wins.forEach(function(w) {
+        var plIdx = rowToPaylineIndex[w.row];
+        var line  = PAYLINES[plIdx] || [w.row, w.row, w.row, w.row, w.row];
+        result.paylineWins.push({ lineIndex: plIdx, line: line, amount: w.amount, count: w.count, symbolKey: 'BONUS_LETTER', isLetter: true, letterRow: w.row });
+      });
     }
   }
 
-  // LIPSTICK TRIGGER: 5-oak on any active payline detected above — fire Pick & Choose
-  if (result.scatterTriggered) {
-    result.triggerPickChoose = true;
-    result.scatterWin = 0; // Trigger only — no direct cash award
+  var bottomRowBonus =
+    grid[0][2] === LETTER_IDS[0] && grid[1][2] === LETTER_IDS[1] &&
+    grid[2][2] === LETTER_IDS[2] && grid[3][2] === LETTER_IDS[3] &&
+    grid[4][2] === LETTER_IDS[4];
+  if (bottomRowBonus) {
+    result.triggerBonusFeature = true;
+    if (result.bonusLetterWins) {
+      var bottomRowWin = null;
+      for (var bwi = 0; bwi < result.bonusLetterWins.length; bwi++) {
+        if (result.bonusLetterWins[bwi].row === 2 && result.bonusLetterWins[bwi].count === 5) { bottomRowWin = result.bonusLetterWins[bwi]; break; }
+      }
+      if (bottomRowWin) { result.totalWin -= bottomRowWin.amount; result.bonusLetterWin -= bottomRowWin.amount; }
+    }
   }
 
-  if (GameState.operator.maxWinPerSpin > 0) {
-    result.totalWin = Math.min(result.totalWin, GameState.operator.maxWinPerSpin);
-  }
+  if (result.scatterTriggered) { result.triggerPickChoose = true; result.scatterWin = 0; }
+  if (GameState.operator.maxWinPerSpin > 0) result.totalWin = Math.min(result.totalWin, GameState.operator.maxWinPerSpin);
   return result;
 }
 
 // ── JACKPOT CHECKS ───────────────────────────────────────────────────
 function checkJackpot(context) {
   if (GameState.operator.forceJackpot !== 'none') {
-    // If jackpot is set for base game context, only consume it in BASE_GAME checks
-    // If set for bonus context, only consume it in non-BASE_GAME checks
-    const jpCtx = GameState.operator.forceJackpotContext || 'bonus';
-    const isBaseCheck = context === 'BASE_GAME';
+    var jpCtx = GameState.operator.forceJackpotContext || 'bonus';
+    var isBaseCheck = context === 'BASE_GAME';
     if (jpCtx === 'any' || (jpCtx === 'base' && isBaseCheck) || (jpCtx === 'bonus' && !isBaseCheck)) {
-      const type = GameState.operator.forceJackpot;
+      var type = GameState.operator.forceJackpot;
       GameState.operator.forceJackpot = 'none';
-      return { type, context, forced: true };
+      return { type: type, context: context, forced: true };
     }
   }
-  const roll = rng.next();
-  if (roll < JACKPOT_ODDS.GRAND)  return { type:'GRAND', context };
-  if (roll < JACKPOT_ODDS.MAJOR)  return { type:'MAJOR', context };
-  if (roll < JACKPOT_ODDS.MINOR)  return { type:'MINOR', context };
-  if (roll < JACKPOT_ODDS.MINI)   return { type:'MINI',  context };
+  var roll = rng.next();
+  if (roll < JACKPOT_ODDS.GRAND) return { type: 'GRAND', context: context };
+  if (roll < JACKPOT_ODDS.MAJOR) return { type: 'MAJOR', context: context };
+  if (roll < JACKPOT_ODDS.MINOR) return { type: 'MINOR', context: context };
+  if (roll < JACKPOT_ODDS.MINI)  return { type: 'MINI',  context: context };
   return null;
 }
 
 async function processJackpotCheck(context) {
-  const result = checkJackpot(context);
+  var result = checkJackpot(context);
   if (!result) return null;
-  const amount = awardJackpot(result.type);
-  logEvent('JACKPOT_HIT', { bonusType:'JACKPOT', jackpotType:result.type, amount, context, serialNumber:_currentSpinSerial, balanceAfter:GameState.balance });
+  var amount = awardJackpot(result.type);
+  logEvent('JACKPOT_HIT', { bonusType:'JACKPOT', jackpotType:result.type, amount:amount, context:context, serialNumber:_currentSpinSerial, balanceAfter:GameState.balance });
   if (typeof UI !== 'undefined') await UI.showJackpotCelebration(result.type, amount, context);
-  return { ...result, amount };
+  return Object.assign({}, result, { amount: amount });
 }
 
-// BASE GAME JACKPOTS — VGT Aristocrat style
-// Scans ALL active paylines — jackpot fires on any active line
-// MINI  = 3+ Sasha consecutive from reel 1 on any active payline
-// MINOR = 3+ Josie consecutive from reel 1 on any active payline
-// MAJOR = all 5 reels Josie/Sasha wilds on any active payline
-// GRAND = all 5 reels Sisters on any active payline
-// Gold Coins never trigger jackpots — only Hold & Spin
-// Returns highest tier found — ONE jackpot per spin maximum
 function checkCharacterJackpots(grid, activeLinesCount) {
-  const activeLines = PAYLINES.slice(0, activeLinesCount);
+  var activeLines = PAYLINES.slice(0, activeLinesCount);
   var highestTier = null;
-  const tierOrder = ['MINI', 'MINOR', 'MAJOR', 'GRAND'];
+  var tierOrder   = ['MINI', 'MINOR', 'MAJOR', 'GRAND'];
 
   for (var li = 0; li < activeLines.length; li++) {
-    const line = activeLines[li];
-    const syms = line.map(function(row, col) { return grid[col][row]; });
-
-    // Gold Coin on this line — skip, never a jackpot line
+    var line = activeLines[li];
+    var syms = line.map(function(row, col) { return grid[col][row]; });
     if (syms.some(function(id) { return id === BONUS_ID; })) continue;
 
     var lineTier = null;
-
-    // GRAND: all 5 Sisters on this payline
     if (syms.every(function(id) { return id === SYMBOLS.SISTERS.id; })) {
       lineTier = 'GRAND';
-    }
-    // MAJOR: all 5 wilds (Josie or Sasha) on this payline
-    else if (syms.every(function(id) { return WILD_IDS.includes(id); })) {
+    } else if (syms.every(function(id) { return WILD_IDS.indexOf(id) >= 0; })) {
       lineTier = 'MAJOR';
-    }
-    // MINOR: 3+ consecutive Josie from reel 1
-    else if (syms[0] === SYMBOLS.JOSIE.id && syms[1] === SYMBOLS.JOSIE.id && syms[2] === SYMBOLS.JOSIE.id) {
+    } else if (syms[0] === SYMBOLS.JOSIE.id && syms[1] === SYMBOLS.JOSIE.id && syms[2] === SYMBOLS.JOSIE.id) {
       lineTier = 'MINOR';
-    }
-    // MINI: 3+ consecutive Sasha from reel 1
-    else if (syms[0] === SYMBOLS.SASHA.id && syms[1] === SYMBOLS.SASHA.id && syms[2] === SYMBOLS.SASHA.id) {
+    } else if (syms[0] === SYMBOLS.SASHA.id && syms[1] === SYMBOLS.SASHA.id && syms[2] === SYMBOLS.SASHA.id) {
       lineTier = 'MINI';
     }
 
-    // Keep highest tier found across all lines — one jackpot per spin
     if (lineTier !== null) {
       if (highestTier === null || tierOrder.indexOf(lineTier) > tierOrder.indexOf(highestTier)) {
         highestTier = lineTier;
       }
     }
   }
-
   return highestTier ? [highestTier] : [];
 }
 
 async function processCharacterJackpots(grid, activeLinesCount, context) {
-  const hits  = checkCharacterJackpots(grid, activeLinesCount);
-  let totalAwarded = 0;
-  const order  = ['MINI','MINOR','MAJOR','GRAND'];
-  const validHits = order.filter(k => hits.includes(k));
-  // HIGHEST TIER ONLY — only award the top jackpot, ignore lower tiers on same spin
+  var hits  = checkCharacterJackpots(grid, activeLinesCount);
+  var totalAwarded = 0;
+  var order = ['MINI','MINOR','MAJOR','GRAND'];
+  var validHits = order.filter(function(k) { return hits.indexOf(k) >= 0; });
   if (validHits.length > 0) {
-    const key    = validHits[validHits.length - 1]; // highest tier
-    const amount = awardJackpot(key);
+    var key    = validHits[validHits.length - 1];
+    var amount = awardJackpot(key);
     totalAwarded = amount;
-    logEvent('JACKPOT_HIT', { bonusType:'JACKPOT', jackpotType:key, trigger:'CHARACTER_SYMBOL', amount, context, serialNumber:_currentSpinSerial, balanceAfter:GameState.balance });
+    logEvent('JACKPOT_HIT', { bonusType:'JACKPOT', jackpotType:key, trigger:'CHARACTER_SYMBOL', amount:amount, context:context, serialNumber:_currentSpinSerial, balanceAfter:GameState.balance });
     if (typeof UI !== 'undefined') await UI.showJackpotCelebration(key, amount, context);
   }
-  return { hits: validHits, totalAwarded };
+  return { hits: validHits, totalAwarded: totalAwarded };
 }
 
-function buildRedSpinGrid() {
-  return buildGrid(generateReelStops());
-}
+function buildRedSpinGrid() { return buildGrid(generateReelStops()); }
 
 function checkRedSpinTrigger() {
   if (GameState.operator.forceRedSpin) { GameState.operator.forceRedSpin = false; return true; }
-  const freq = GameState.operator.redSpinFrequency * GameState.operator.bonusFrequencyMultiplier;
+  var freq = GameState.operator.redSpinFrequency * GameState.operator.bonusFrequencyMultiplier;
   return rng.chance(freq);
 }
 
-function generateCashCoinValue(betPerLine, linesActive) {
-  // Fraction-based tiers — value = random fraction of totalBet.
-  // Max tier is 5× totalBet, so no hard cap needed.
-  // Monte Carlo verified: contributes ~2.08× totalBet avg across all denoms.
-  const totalBet = betPerLine * linesActive;
-  const roll     = rng.next();
-  let cumulative = 0;
-  for (var i = 0; i < HOLD_SPIN_CASH_TIERS.length; i++) {
-    var tier = HOLD_SPIN_CASH_TIERS[i];
-    cumulative += tier.weight;
-    if (roll < cumulative) {
-      var frac = tier.minFrac + rng.next() * (tier.maxFrac - tier.minFrac);
-      return Math.round(totalBet * frac * 100) / 100;
-    }
-  }
-  // Fallback — tiny cash coin
-  return Math.round(totalBet * 0.03 * 100) / 100;
-}
-
-
 // ── QUEUED SPIN ───────────────────────────────────────────────────────
-// When player presses Spin during payline display, queue the next spin.
-// executeSpin() checks this at the end and auto-fires it.
-let _nextSpinQueued = false;
-let _nextSpinBet    = null;
-let _nextSpinLines  = null;
+var _nextSpinQueued = false, _nextSpinBet = null, _nextSpinLines = null;
 
 function queueNextSpin(betPerLine, linesActive) {
-  // Never queue a spin during an active bonus — would cause phantom spin after bonus
   if (GameState.activeBonus) return;
-  _nextSpinQueued = true;
-  _nextSpinBet    = betPerLine;
-  _nextSpinLines  = linesActive;
+  _nextSpinQueued = true; _nextSpinBet = betPerLine; _nextSpinLines = linesActive;
 }
+function clearQueuedSpin() { _nextSpinQueued = false; _nextSpinBet = null; _nextSpinLines = null; }
 
-function clearQueuedSpin() {
-  _nextSpinQueued = false;
-  _nextSpinBet    = null;
-  _nextSpinLines  = null;
-}
-
-function hasQueuedSpin() { return _nextSpinQueued; }
-
-// ── MAIN SPIN HANDLER ────────────────────────────────────────────────
-// Tracks a "skip paylines" flag set when player hits SPIN during animations
-let _skipPaylineAnimations = false;
-
+// ── SKIP PAYLINES ─────────────────────────────────────────────────────
+var _skipPaylineAnimations = false;
 function setSkipPaylineAnimations(val) { _skipPaylineAnimations = val; }
 function getSkipPaylineAnimations()    { return _skipPaylineAnimations; }
 
-// MLMC executeSpin — accepts denom and creditsPerLine
-// betPerLine = denom * creditsPerLine (passed pre-calculated for backward compat)
-async function executeSpin(betPerLine, linesActive, denom=null, creditsPerLine=null) {
+// ── MAIN SPIN HANDLER ────────────────────────────────────────────────
+async function executeSpin(betPerLine, linesActive, denom, creditsPerLine) {
   if (GameState.spinInProgress) return;
-  // MLMC: if denom provided, use it; otherwise treat betPerLine as flat amount
-  var _denom   = (denom != null) ? denom : (GameState.lastDenom != null ? GameState.lastDenom : 0.05);
+  var _denom   = (denom   != null) ? denom   : (GameState.lastDenom          != null ? GameState.lastDenom          : 0.05);
   var _credits = (creditsPerLine != null) ? creditsPerLine : (GameState.lastCreditsPerLine != null ? GameState.lastCreditsPerLine : 1);
-  // betPerLine already = denom * creditsPerLine when called from index.html
-  const totalBet = betPerLine * linesActive;
+  var totalBet = betPerLine * linesActive;
   if (GameState.balance < totalBet) {
     if (typeof UI !== 'undefined') UI.showMessage('Insufficient balance'); return;
   }
 
-  // Generate serial number for this spin
-  _currentSpinSerial = generateSerialNumber();
-
+  _currentSpinSerial   = generateSerialNumber();
   GameState.spinInProgress = true;
   _skipPaylineAnimations   = false;
   GameState.balance       -= totalBet;
@@ -451,101 +324,124 @@ async function executeSpin(betPerLine, linesActive, denom=null, creditsPerLine=n
 
   contributeToJackpots(totalBet);
   startGameRecord({ perLine: betPerLine, lines: linesActive, total: totalBet });
-  logEvent('SPIN_START', {
-    bet: { perLine: betPerLine, lines: linesActive, total: totalBet },
-    serialNumber: _currentSpinSerial,
-    balanceBefore: GameState.balance + totalBet,
-  });
+  logEvent('SPIN_START', { bet: { perLine: betPerLine, lines: linesActive, total: totalBet }, serialNumber: _currentSpinSerial, balanceBefore: GameState.balance + totalBet });
 
   if (typeof UI !== 'undefined') UI.onSpinStart();
   if (typeof Audio !== 'undefined') Audio.play('spin');
 
-  const stops = generateReelStops();
+  var stops  = generateReelStops();
   GameState.operator.forceReelStops = [null, null, null, null, null];
-  const grid   = buildGrid(stops);
-  const result = evaluateSpin(grid, linesActive, betPerLine);
+  var grid   = buildGrid(stops);
+  var result = evaluateSpin(grid, linesActive, betPerLine);
 
   if (GameState.eventLog.currentGame) {
-    GameState.eventLog.currentGame.reelStops  = stops;
-    GameState.eventLog.currentGame.grid       = grid;
+    GameState.eventLog.currentGame.reelStops    = stops;
+    GameState.eventLog.currentGame.grid         = grid;
     GameState.eventLog.currentGame.serialNumber = _currentSpinSerial;
-    GameState.eventLog.currentGame.baseResult = {
-      wins: result.paylineWins, scatterCount: result.scatterCount,
-      bonusCount: result.bonusCount, totalWin: result.totalWin,
-    };
+    GameState.eventLog.currentGame.baseResult   = { wins: result.paylineWins, scatterCount: result.scatterCount, bonusCount: result.bonusCount, totalWin: result.totalWin };
   }
 
-  // Apply operator force overrides BEFORE animating — so reels show forced symbols
-  if (GameState.operator.forceBonusGame)   { result.triggerHoldSpin    = true; GameState.operator.forceBonusGame   = false; }
-  if (GameState.operator.forceFreeSpins) {
-    result.triggerPickChoose = true;
-    result.scatterTriggered  = true;
-    GameState.operator.forceFreeSpins = false;
-    // Write 5 lipstick symbols on center row (payline 0) so player sees 5-oak trigger
-    for (var fCol = 0; fCol < 5; fCol++) {
-      grid[fCol][1] = SCATTER_ID;
+  if (GameState.operator.comboArmed) GameState.operator.comboArmed = false;
+
+  // ── BONUS Feature RNG check — fires every spin ──────────────────────
+  // Supplements the natural bottom-row B-O-N-U-S letter trigger.
+  // Owner confirmed v6l99: BONUS orb should "always be considered" — it redirects
+  // to H&S, P&C, or RS so it adds meaningful bonus variety each session.
+  // Does NOT fire if H&S already triggered (H&S takes priority).
+  // RS will suppress it at line 459 if RS also triggers on this spin.
+  if (!result.triggerHoldSpin && !result.triggerBonusFeature) {
+    var bonusFreq = (typeof BONUS_FEATURE_FREQ_DEFAULT !== 'undefined')
+      ? BONUS_FEATURE_FREQ_DEFAULT : 0.0067;
+    if (rng.chance(bonusFreq * (GameState.operator.bonusFrequencyMultiplier || 1))) {
+      result.triggerBonusFeature = true;
     }
-    result.scatterCount = 5;
+  }
+
+  // ── FORCE OVERRIDES ──────────────────────────────────────────────────
+  // Mutual exclusion: if forceRedSpin is armed, it takes priority over all other force flags.
+  // Arming one force flag should disarm others — this prevents e.g. BONUS letters
+  // appearing on reels before Red Spin starts (Phase Plan bug: Force trigger order).
+  if (GameState.operator.forceRedSpin) {
+    GameState.operator.forceBonusGame    = false;
+    GameState.operator.forceFreeSpins    = false;
+    GameState.operator.forceBonusFeature = false;
+    // forceRedSpin itself is consumed inside checkRedSpinTrigger() below
+    // Clear any natural bonus triggers so RS gets full priority
+    result.triggerHoldSpin     = false;
+    result.triggerPickChoose   = false;
+    result.triggerBonusFeature = false;
+  }
+  if (GameState.operator.forceBonusGame) {
+    GameState.operator.forceBonusGame = false;
+    var coinId = BONUS_ID, allPos = [];
+    for (var fCol = 0; fCol < 5; fCol++) for (var fRow = 0; fRow < 3; fRow++) allPos.push([fCol, fRow]);
+    for (var si = allPos.length - 1; si > 0; si--) {
+      var sj = Math.floor(Math.random() * (si + 1));
+      var tmp = allPos[si]; allPos[si] = allPos[sj]; allPos[sj] = tmp;
+    }
+    var coinCount2 = 6 + Math.floor(Math.random() * 4);
+    var placed2 = 0;
+    for (var pi = 0; pi < allPos.length && placed2 < coinCount2; pi++) { grid[allPos[pi][0]][allPos[pi][1]] = coinId; placed2++; }
+    result.bonusCount = placed2; result.triggerHoldSpin = true;
+  }
+  if (GameState.operator.forceFreeSpins) {
+    GameState.operator.forceFreeSpins = false;
+    var centerLine2 = PAYLINES[0];
+    for (var fCol2 = 0; fCol2 < 5; fCol2++) grid[fCol2][centerLine2[fCol2]] = BONUS_PC_ID;
+    result.triggerPickChoose = true; result.scatterTriggered = true; result.scatterCount = 5;
   }
   if (GameState.operator.forceBonusFeature) {
-    result.triggerBonusFeature = true;
     GameState.operator.forceBonusFeature = false;
-    // Write BONUS letters into grid BEFORE animation — clear duplicates first
+    var bRow = 2;
     for (var bCol = 0; bCol < 5; bCol++) {
       var letterId = LETTER_IDS[bCol];
-      for (var bRow = 0; bRow < 3; bRow++) {
-        if (grid[bCol][bRow] === letterId) grid[bCol][bRow] = SYMBOLS.CHERRY.id;
-      }
-      grid[bCol][1] = letterId;
+      for (var br = 0; br < 3; br++) { if (br !== bRow && grid[bCol][br] === letterId) grid[bCol][br] = SYMBOLS.LIPSTICK.id; }
+      grid[bCol][bRow] = letterId;
     }
-    result.bonusLetterCount = 5;
-    result.bonusLetterRow   = 1;
+    var neutralSymbols = [SYMBOLS.SEVEN.id, SYMBOLS.TRIPLE_BAR.id, SYMBOLS.DIAMOND.id, SYMBOLS.DOUBLE_BAR.id];
+    for (var nr = 0; nr < 3; nr++) {
+      if (nr === bRow) continue;
+      for (var nc = 0; nc < 5; nc++) {
+        if (LETTER_IDS.indexOf(grid[nc][nr]) >= 0) grid[nc][nr] = neutralSymbols[Math.floor(Math.random() * neutralSymbols.length)];
+      }
+    }
+    result.triggerBonusFeature = true; result.bonusLetterCount = 5; result.bonusLetterRow = bRow;
   }
-
-  // Force base game jackpot — write actual reel combination to center row
-  // VGT Aristocrat: jackpots fire on any active payline — force to center (row 1)
   if (GameState.operator.forceJackpot !== 'none' &&
       (GameState.operator.forceJackpotContext === 'base' || GameState.operator.forceJackpotContext === 'any')) {
     var fjType = GameState.operator.forceJackpot;
     GameState.operator.forceJackpot = 'none';
-    // Pick a random active payline row to write the combination on
-    // Use the first active payline's row pattern at a random column position
-    var activeLines = PAYLINES.slice(0, linesActive);
-    var randomLine  = activeLines[Math.floor(Math.random() * activeLines.length)];
-    // Use the center column row value to determine the target row (consistent across reels)
-    var fjRow = randomLine[2]; // center reel row — consistent for a straight line
-    if (fjType === 'MINI') {
-      for (var fc = 0; fc < 5; fc++) grid[fc][fjRow] = fc < 3 ? SYMBOLS.SASHA.id : SYMBOLS.CHERRY.id;
-    } else if (fjType === 'MINOR') {
-      for (var fc = 0; fc < 5; fc++) grid[fc][fjRow] = fc < 3 ? SYMBOLS.JOSIE.id : SYMBOLS.CHERRY.id;
-    } else if (fjType === 'MAJOR') {
-      for (var fc = 0; fc < 5; fc++) grid[fc][fjRow] = rng.chance(0.5) ? SYMBOLS.JOSIE.id : SYMBOLS.SASHA.id;
-    } else if (fjType === 'GRAND') {
-      for (var fc = 0; fc < 5; fc++) grid[fc][fjRow] = SYMBOLS.SISTERS.id;
-    }
-    // Re-evaluate with new grid so jackpot is detected
+    var activeLines2 = PAYLINES.slice(0, linesActive);
+    var randomLine   = activeLines2[Math.floor(Math.random() * activeLines2.length)];
+    var fjRow        = randomLine[2];
+    if (fjType === 'MINI')  { for (var fc = 0; fc < 5; fc++) grid[fc][fjRow] = fc < 3 ? SYMBOLS.SASHA.id : SYMBOLS.LIPSTICK.id; }
+    else if (fjType === 'MINOR') { for (var fc = 0; fc < 5; fc++) grid[fc][fjRow] = fc < 3 ? SYMBOLS.JOSIE.id : SYMBOLS.LIPSTICK.id; }
+    else if (fjType === 'MAJOR') { for (var fc = 0; fc < 5; fc++) grid[fc][fjRow] = rng.chance(0.5) ? SYMBOLS.JOSIE.id : SYMBOLS.SASHA.id; }
+    else if (fjType === 'GRAND') { for (var fc = 0; fc < 5; fc++) grid[fc][fjRow] = SYMBOLS.SISTERS.id; }
     var newResult = evaluateSpin(grid, linesActive, betPerLine);
-    result.paylineWins      = newResult.paylineWins;
-    result.totalWin         = newResult.totalWin;
-    result.bonusCount       = newResult.bonusCount;
-    result.scatterCount     = newResult.scatterCount;
-    // Suppress any bonus triggers on this forced jackpot spin
-    result.triggerHoldSpin    = false;
-    result.triggerPickChoose  = false;
-    result.triggerBonusFeature = false;
+    result.paylineWins = newResult.paylineWins; result.totalWin = newResult.totalWin;
+    result.bonusCount  = newResult.bonusCount;  result.scatterCount = newResult.scatterCount;
+    result.triggerHoldSpin = false; result.triggerPickChoose = false; result.triggerBonusFeature = false;
+  }
+
+  // Pre-generate H&S coin values
+  var _spinCoinData = null;
+  if (result.bonusCount > 0) {
+    _spinCoinData = Bonuses.pregenerateTriggerCoins(grid, betPerLine, linesActive);
+    if (typeof UI !== 'undefined') UI.setPendingCoinMap(_spinCoinData.coinMap);
   }
 
   if (typeof UI !== 'undefined') await UI.animateReelsStop(stops, grid);
+  if (typeof UI !== 'undefined') UI.setPendingCoinMap(null);
 
-  // BASE GAME: No random-roll jackpots — character symbol jackpots on ANY active payline (VGT Aristocrat)
-  const charJackpots = await processCharacterJackpots(grid, linesActive, 'BASE_GAME');
+  var charJackpots = await processCharacterJackpots(grid, linesActive, 'BASE_GAME');
+  var totalWon = result.totalWin + (charJackpots ? charJackpots.totalAwarded || 0 : 0);
 
-  let totalWon = result.totalWin
-    + (charJackpots ? charJackpots.totalAwarded || 0 : 0);
+  // Red Spin — PERMANENT RULE: only on winning spins, never on $0 spins
+  var redSpinTriggeredEarly = (result.totalWin > 0 || (charJackpots && charJackpots.totalAwarded > 0))
+    ? checkRedSpinTrigger()
+    : false;
 
-  const redSpinTriggeredEarly = checkRedSpinTrigger();
-
-  // Ring bells IMMEDIATELY when win detected — before any animation
   if (result.totalWin > 0 && typeof Audio !== 'undefined') {
     Audio.play(result.totalWin > totalBet * 10 ? 'win_big' : 'win_small');
     Audio.playBellsForWin(result.totalWin, betPerLine);
@@ -553,31 +449,18 @@ async function executeSpin(betPerLine, linesActive, denom=null, creditsPerLine=n
 
   if (result.paylineWins.length > 0 || result.scatterWin) {
     if (redSpinTriggeredEarly || result.triggerBonusFeature) {
-      // Red Spin or BONUS feature triggered — brief simultaneous flash only, then go straight to bonus
-      // No cycling through individual lines — orbs/red screen appear immediately after
       if (typeof UI !== 'undefined') await UI.showBaseWins(result, betPerLine, linesActive, false, true);
     } else if (!_skipPaylineAnimations) {
-      // Normal base game win display — full animation with cycling
       if (typeof UI !== 'undefined') await UI.showBaseWins(result, betPerLine, linesActive);
     }
   }
 
-  // Credit base game win to balance FIRST — visible on meter before Red Spin starts
   GameState.balance += result.totalWin;
-
-  // Show BONUS letter partial win toast
-  if (result.bonusLetterWin && result.bonusLetterWin > 0 && typeof UI !== 'undefined') {
-    UI.showBonusLetterWin(result.bonusLetterCount, result.bonusLetterWin, result.bonusLetterRow);
-  }
-
-  // Update balance and win display BEFORE activating red screen
-  // Player sees their base win credited on meter, THEN Red Spin launches
   if (typeof UI !== 'undefined') {
     UI.updateBalance(GameState.balance);
     if (result.totalWin > 0) UI.updateWinDisplay(result.totalWin);
   }
 
-  // Activate Red Spin screen AFTER base win is shown
   if (redSpinTriggeredEarly) {
     if (typeof Audio !== 'undefined') Audio.play('red_spin_entry');
     if (typeof UI !== 'undefined') UI.activateRedScreen();
@@ -585,112 +468,120 @@ async function executeSpin(betPerLine, linesActive, denom=null, creditsPerLine=n
 
   logEvent(result.totalWin > 0 ? 'BASE_WIN' : 'BASE_LOSS', {
     bet: { perLine: betPerLine, lines: linesActive, total: totalBet },
-    serialNumber: _currentSpinSerial,
-    reelStops: stops, grid, wins: result.paylineWins,
-    scatterCount: result.scatterCount, bonusCount: result.bonusCount,
-    totalWin: result.totalWin, netResult: result.totalWin - totalBet,
-    balanceBefore: GameState.balance - result.totalWin + totalBet,
-    balanceAfter:  GameState.balance,
+    serialNumber: _currentSpinSerial, reelStops: stops, grid: grid, wins: result.paylineWins,
+    scatterCount: result.scatterCount, bonusCount: result.bonusCount, totalWin: result.totalWin,
+    netResult: result.totalWin - totalBet,
+    balanceBefore: GameState.balance - result.totalWin + totalBet, balanceAfter: GameState.balance,
   });
 
-  recordSpin(totalBet, totalWon);
-
-  if (typeof UI !== 'undefined') {
-    UI.updateBalance(GameState.balance);
-    UI.updateWinDisplay(result.totalWin);
-  }
-
+  if (typeof UI !== 'undefined') { UI.updateBalance(GameState.balance); UI.updateWinDisplay(result.totalWin); }
   _skipPaylineAnimations = false;
-  const currentContext = { base_game:true, red_spin:false, hold_spin:false, pick_choose:false };
+  var currentContext = { base_game: true, red_spin: false, hold_spin: false, pick_choose: false };
 
-  // Clear queued spin when any bonus fires
   if (result.triggerPickChoose || result.triggerHoldSpin || result.triggerBonusFeature) {
     if (typeof clearQueuedSpin !== 'undefined') clearQueuedSpin();
   }
 
-  // BONUS Feature FIRST — its prize sets triggerHoldSpin/PickChoose/RedSpin
-  // Suppress any coin/scatter triggered bonuses — BONUS feature overrides them
-  if (result.triggerBonusFeature) {
-    result.triggerHoldSpin   = false; // BONUS feature decides, not coin count
-    result.triggerPickChoose = false; // BONUS feature decides, not scatter count
-    GameState.stats.bonusFeatureCount = (GameState.stats.bonusFeatureCount || 0) + 1;
-    logEvent('BONUS_TRIGGER', { bonusType:'BONUS_FEATURE', context:'base_game', serialNumber:_currentSpinSerial });
-    if (typeof Audio !== 'undefined') Audio.play('bonus_trigger');
-    const bonusResult = await Bonuses.runBonusFeature(betPerLine, linesActive, currentContext);
-    totalWon += bonusResult.totalWon;
-    // Set flags so the chosen bonus runs in the blocks below
-    if (bonusResult.awardHoldSpin)   result.triggerHoldSpin   = true;
-    if (bonusResult.awardRedSpin)    result.triggerRedSpin    = true;
-    if (bonusResult.awardPickChoose) result.triggerPickChoose  = true;
+  // ── BONUS PRIORITY: RS > H&S > BONUS Letters > P&C ──────────────────
+  if (redSpinTriggeredEarly) {
+    result.triggerHoldSpin = false; result.triggerPickChoose = false; result.triggerBonusFeature = false;
   }
 
-  // Pick & Choose (Lipstick scatter OR awarded from BONUS feature)
-  // Note: disablePickChooseInRedSpin is a Red Spin operator flag — never applied in base game
-  if (result.triggerPickChoose) {
+  if (result.triggerBonusFeature) {
+    result.triggerHoldSpin = false; result.triggerPickChoose = false;
+    GameState.stats.bonusFeatureCount = (GameState.stats.bonusFeatureCount || 0) + 1;
+    logEvent('BONUS_TRIGGER', { bonusType: 'BONUS_FEATURE', context: 'base_game', serialNumber: _currentSpinSerial });
+    if (typeof Audio !== 'undefined') Audio.play('bonus_trigger');
+    var bonusResult = { totalWon: 0, awardHoldSpin: false, awardPickChoose: false, awardRedSpin: false };
+    try {
+      bonusResult = await Bonuses.runBonusFeature(betPerLine, linesActive, Object.assign({}, currentContext, { noJackpots: true }));
+    } catch(bfErr) {
+      console.error('BONUS Feature error:', bfErr);
+      GameState.activeBonus = null;
+      if (typeof UI !== 'undefined') { UI.setControlsEnabled(true); UI.showToast('Bonus error — please spin again'); }
+    }
+    totalWon += bonusResult.totalWon;
+    if (bonusResult.awardHoldSpin || bonusResult.awardPickChoose) currentContext.noJackpots = true;
+    if (bonusResult.awardHoldSpin)   result.triggerHoldSpin  = true;
+    if (bonusResult.awardRedSpin)    result.triggerRedSpin   = true;
+    if (bonusResult.awardPickChoose) result.triggerPickChoose = true;
+  }
+
+  if (result.triggerPickChoose && !redSpinTriggeredEarly) {
     GameState.stats.pickChooseCount++;
-    logEvent('BONUS_TRIGGER', { bonusType:'PICK_CHOOSE', context:'base_game', serialNumber:_currentSpinSerial });
+    logEvent('BONUS_TRIGGER', { bonusType: 'PICK_CHOOSE', context: 'base_game', serialNumber: _currentSpinSerial });
     if (typeof Audio !== 'undefined') Audio.play('pick_trigger');
-    const extraPicks = result.extraPickCount || 0;
-    const pickResult = await Bonuses.runPickChoose(betPerLine, linesActive, currentContext, extraPicks);
+    var pcContext  = Object.assign({}, currentContext, { triggerStops: stops, triggerGrid: grid });
+    var pickResult = await Bonuses.runPickChoose(betPerLine, linesActive, pcContext);
     totalWon += pickResult.totalWon;
     if (GameState.eventLog.currentGame) {
-      GameState.eventLog.currentGame.bonuses.push({ type:'PICK_CHOOSE', triggeredAt:'base_game', events:pickResult.events, outcome:pickResult.outcome });
+      GameState.eventLog.currentGame.bonuses.push({ type: 'PICK_CHOOSE', triggeredAt: 'base_game', events: pickResult.events, outcome: pickResult.outcome });
     }
-    if (pickResult.awardHoldSpin) result.triggerHoldSpin = true;
-    if (pickResult.awardRedSpin)  result.triggerRedSpin  = true;
+    if (pickResult.awardHoldSpin) { result.triggerHoldSpin = true; currentContext.fromPickChoose = true; }
+    if (pickResult.awardRedSpin)   result.triggerRedSpin = true;
   }
 
-  // Hold & Spin (coins OR awarded from BONUS feature / Pick & Choose)
-  if (result.triggerHoldSpin) {
+  if (result.triggerHoldSpin && !redSpinTriggeredEarly) {
     GameState.stats.holdSpinCount++;
-    logEvent('BONUS_TRIGGER', { bonusType:'HOLD_SPIN', context:'base_game', serialNumber:_currentSpinSerial });
+    logEvent('BONUS_TRIGGER', { bonusType: 'HOLD_SPIN', context: 'base_game', serialNumber: _currentSpinSerial });
     if (typeof Audio !== 'undefined') Audio.play('hold_spin_trigger');
-    let holdResult = { totalWon: 0, events: [], outcome: null };
+    var holdResult = { totalWon: 0, events: [], outcome: null };
     try {
-      holdResult = await Bonuses.runHoldSpin(betPerLine, linesActive, stops, grid, currentContext);
+      if (!_spinCoinData && result.bonusCount > 0) _spinCoinData = Bonuses.pregenerateTriggerCoins(grid, betPerLine, linesActive);
+      if (_spinCoinData && typeof UI !== 'undefined') {
+        UI.overlayReelCoinValues(grid, _spinCoinData.coinMap);
+        await new Promise(function(res) { setTimeout(res, 800); });
+      }
+      var hsContext = Object.assign({}, currentContext, { triggerCoinMap: _spinCoinData ? _spinCoinData.coinMap : null });
+      holdResult = await Bonuses.runHoldSpin(betPerLine, linesActive, stops, grid, hsContext);
       totalWon += holdResult.totalWon;
     } catch(hsErr) {
-      // Safety net — never leave game frozen
       console.error('Hold & Spin error:', hsErr);
       GameState.activeBonus = null;
       if (typeof UI !== 'undefined') {
         var hs = document.getElementById('hold-screen');
         if (hs) hs.classList.remove('active');
-        UI.setControlsEnabled(true);
-        UI.showToast('Hold & Spin error — please spin again');
+        UI.setControlsEnabled(true); UI.showToast('Hold & Spin error — please spin again');
       }
     }
     if (GameState.eventLog.currentGame) {
-      GameState.eventLog.currentGame.bonuses.push({ type:'HOLD_SPIN', triggeredAt:'base_game', events:holdResult.events, outcome:holdResult.outcome });
+      GameState.eventLog.currentGame.bonuses.push({ type: 'HOLD_SPIN', triggeredAt: 'base_game', events: holdResult.events, outcome: holdResult.outcome });
     }
   }
 
-  // Red Spin — bell + red screen already fired after reels stopped (see above)
-  const redSpinTriggered = result.triggerRedSpin || redSpinTriggeredEarly;
+  var redSpinTriggered = result.triggerRedSpin || redSpinTriggeredEarly;
   if (redSpinTriggered) {
-    // Clear any queued spin — bonus takes full control, no auto-spin after
     clearQueuedSpin();
-    // Bell + red screen already active — go straight to bonus
     GameState.stats.redSpinCount++;
-    logEvent('BONUS_TRIGGER', { bonusType:'RED_SPIN', context:'base_game', serialNumber:_currentSpinSerial });
-    const redResult = await Bonuses.runRedSpin(betPerLine, linesActive, currentContext);
+    logEvent('BONUS_TRIGGER', { bonusType: 'RED_SPIN', context: 'base_game', serialNumber: _currentSpinSerial });
+    var redResult = { totalWon: 0, events: [], outcome: null };
+    try {
+      var rsContext = Object.assign({}, currentContext, { prevWin: result.totalWin });
+      redResult = await Bonuses.runRedSpin(betPerLine, linesActive, rsContext);
+    } catch(rsErr) {
+      console.error('Red Spin error:', rsErr);
+      GameState.activeBonus = null;
+      if (typeof UI !== 'undefined') { UI.endRedSpinImmediate(); UI.deactivateRedScreen(); UI.setControlsEnabled(true); UI.showToast('Red Spin error — please spin again'); }
+    }
     totalWon += redResult.totalWon;
     if (GameState.eventLog.currentGame) {
-      GameState.eventLog.currentGame.bonuses.push({ type:'RED_SPIN', triggeredAt:'base_game', events:redResult.events, outcome:redResult.outcome });
+      GameState.eventLog.currentGame.bonuses.push({ type: 'RED_SPIN', triggeredAt: 'base_game', events: redResult.events, outcome: redResult.outcome });
     }
-    // Immediately restore base game as soon as last red spin complete (no delay)
-    clearQueuedSpin(); // Prevent phantom spin after bonus
-    if (typeof UI !== 'undefined') {
-      UI.endRedSpinImmediate();
-      UI.deactivateRedScreen();
-    }
+    clearQueuedSpin();
+    if (typeof UI !== 'undefined') { UI.endRedSpinImmediate(); UI.deactivateRedScreen(); }
+
+    // ── Additional RS rounds ─────────────────────────────────────────────
+    // No automatic chain. After RS ends, player returns to base game.
+    // If they spin and land a winning combination, natural RS trigger applies.
+    // (Owner confirmed v6l97 — additional RS via natural base game trigger only)
   }
 
-  const summary = {
-    totalBet, totalWon, netResult: totalWon - totalBet,
+  recordSpin(totalBet, totalWon);
+
+  var summary = {
+    totalBet: totalBet, totalWon: totalWon, netResult: totalWon - totalBet,
     serialNumber: _currentSpinSerial,
-    balanceBefore: GameState.balance - totalWon + totalBet,
-    balanceAfter:  GameState.balance,
+    balanceBefore: GameState.balance - totalWon + totalBet, balanceAfter: GameState.balance,
     biggestSingleWin: result.totalWin,
     bonusesTriggered: [
       result.triggerPickChoose && 'PICK_CHOOSE',
@@ -699,36 +590,29 @@ async function executeSpin(betPerLine, linesActive, denom=null, creditsPerLine=n
     ].filter(Boolean),
   };
 
+  if (GameState.eventLog.currentGame) {
+    var _cg = GameState.eventLog.currentGame;
+    _cg.denom = _denom; _cg.creditsPerLine = _credits;
+    if (grid) {
+      _cg.centerRow = grid.map(function(col) {
+        var sym = SYMBOL_BY_ID[col[1]];
+        return sym ? sym.name : 'Unknown';
+      });
+    }
+  }
+
   finalizeGameRecord(summary);
   saveState();
 
-  if (typeof UI !== 'undefined') {
-    UI.updateBalance(GameState.balance);
-    UI.onSpinComplete(summary);
-  }
-
+  if (typeof UI !== 'undefined') { UI.updateBalance(GameState.balance); UI.onSpinComplete(summary); }
   GameState.spinInProgress = false;
+  if (!GameState.activeBonus && typeof UI !== 'undefined') UI.deactivateRedScreen();
 
-  // Safety cleanup — ensure red screen is off if bonus ended abnormally
-  if (!GameState.activeBonus && typeof UI !== 'undefined') {
-    UI.deactivateRedScreen();
-  }
-
-  // Only fire queued spin if it was queued during BASE GAME payline display
-  // Never fire after a bonus — bonuses clear the queue themselves
   if (_nextSpinQueued && !GameState.activeBonus) {
-    const qBet   = _nextSpinBet;
-    const qLines = _nextSpinLines;
+    var qBet = _nextSpinBet, qLines = _nextSpinLines;
     clearQueuedSpin();
-    // Small yield so UI can update, then fire immediately
-    setTimeout(() => executeSpin(qBet, qLines), 80);
+    setTimeout(function() { executeSpin(qBet, qLines); }, 80);
   }
 
   return summary;
-}
-
-// Preview check for red spin (doesn't consume RNG — just peeks at state)
-// Used to ring bell before showing base wins
-function checkRedSpinTriggerPreview() {
-  return false; // Preview disabled — actual check in main flow
 }
