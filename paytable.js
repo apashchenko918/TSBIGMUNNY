@@ -30,9 +30,14 @@ const SYMBOLS = {
   STRAYPUP:   { id:17, name:'StrayPup',  type:'png', file:'assets/scott.png',                isWild:false, isScatter:false, isBonus:false },
 };
 
-const SYMBOL_BY_ID = Object.values(SYMBOLS).reduce((a,s) => { a[s.id]=s; return a; }, {});
+// ES5 rewrite — Object.values() not safe on Samsung Browser < 6 (v6l111)
+var SYMBOL_BY_ID = (function() {
+  var _map = {}, _keys = Object.keys(SYMBOLS);
+  for (var _i = 0; _i < _keys.length; _i++) { var _s = SYMBOLS[_keys[_i]]; _map[_s.id] = _s; }
+  return _map;
+}());
 const WILD_IDS     = [SYMBOLS.JOSIE.id, SYMBOLS.SASHA.id];
-const SCATTER_ID   = null; // No scatter symbol — Lipstick is a bonus trigger, not a scatter
+// SCATTER_ID removed v6l106 — null constant, never used. Lipstick is a bonus trigger (BONUS_PC_ID).
 const BONUS_PC_ID  = SYMBOLS.LIPSTICK.id; // P&C trigger — 5-oak on center payline (Line 1, middle row)
 const BONUS_ID     = SYMBOLS.GOLD_COIN.id;
 const LETTER_IDS   = [10, 11, 12, 13, 14]; // B O N U S — one per reel
@@ -76,7 +81,7 @@ const PAY_TABLE = {
   DJ_MAXINE:  [ 200, 150,  100,  0],  // owner-confirmed 2026-05-19
   // ── MID-TIER SYMBOLS ─────────────────────────────────────────────
   SEVEN:      [  70,  60,   50,  0],  // owner-confirmed 2026-05-19
-  DIAMOND:    [  50,  40,   30,  0],  // owner-confirmed 2026-05-19: below Single Bar in hierarchy
+  DIAMOND:    [  50,  40,   30,  0],  // 4 stops/reel (restored v6l108). Mid-tier: above Triple Bar, below Seven.
   // ── BAR SYMBOLS (min 3-oak on payline) ───────────────────────────
   TRIPLE_BAR: [  30,  25,   20,  0],  // owner-confirmed 2026-05-19
   DOUBLE_BAR: [  20,  16,   12,  0],  // owner-confirmed 2026-05-19
@@ -134,7 +139,8 @@ const MIXED_BAR_PAY = { 3: 5, 4: 10, 5: 15 }; // owner-confirmed 2026-05-18 (v6l
 const BAR_IDS = [SYMBOLS.TRIPLE_BAR.id, SYMBOLS.DOUBLE_BAR.id, SYMBOLS.SINGLE_BAR.id];
 
 // Wild multiplier
-const WILD_MULTIPLIERS = { 1: 2, 2: 3, 3: 4 }; // Points-based: Josie=2pts Sasha=1pt — 1pt=×2 2pt=×3 3pt+=×4 (owner-confirmed 2026-05-19)
+// WILD_MULTIPLIERS removed v6l99 — superseded by additive formula in game.js evaluateLine().
+// Formula: max(1, josieCount×2 + sashaCount×1). See GAME_DESIGN_MANUAL.md §5.
 
 // BONUS_PC_ID = Lipstick. 5-oak on center payline (Line 1, middle row) = Pick & Choose trigger.
 // Lipstick pays [0,0,0,0] on all paylines — bonus trigger only (owner-confirmed 2026-05-18).
@@ -149,56 +155,64 @@ const REEL_SIZE = 80; // 80 stops per reel — all 5 reels must equal this
 //   5=DoubleBar 6=SingleBar         8=Lipstick 9=GoldCoin
 //   10=B  11=O  12=N  13=U  14=S   15=Diamond  16=DJMaxine  17=StrayPup
 //
-// CURRENT symbol counts per reel (base symbols identical; BONUS letter count varies per reel):
-//   Sisters(0):1   Josie(1):2   Sasha(2):2   StrayPup(17):2
-//   GoldCoin(9):10  Lipstick(8):12  Diamond(15):8
-//   R1: DJMaxine(16):4  Seven(3):8  TripleBar(4):10  DoubleBar(5):11  SingleBar(6):8  B(10):2   Σ=80
-//   R2: DJMaxine(16):4  Seven(3):8  TripleBar(4):10  DoubleBar(5):9   SingleBar(6):8  O(11):4   Σ=80
-//   R3: DJMaxine(16):4  Seven(3):7  TripleBar(4):9   DoubleBar(5):10  SingleBar(6):7  N(12):6   Σ=80
-//   R4: DJMaxine(16):4  Seven(3):7  TripleBar(4):9   DoubleBar(5):10  SingleBar(6):7  U(13):6   Σ=80
-//   R5: DJMaxine(16):4  Seven(3):8  TripleBar(4):10  DoubleBar(5):9   SingleBar(6):8  S(14):4   Σ=80
+// CURRENT symbol counts per reel — v7.0.5 final (Gold Coin 15→11, Diamond 4→8)
+//   Sisters(0):1  Josie(1):1  Sasha(2):2  StrayPup(17):1  DJMaxine(16):2
+//   GoldCoin(9):11  Lipstick(8):18  Diamond(15):8
+//   R1: Seven(3):7  TripleBar(4):9  DoubleBar(5):10  SingleBar(6):8  B(10):2   Σ=80 ✅
+//   R2: Seven(3):7  TripleBar(4):9  DoubleBar(5):8   SingleBar(6):8  O(11):4   Σ=80 ✅
+//   R3: Seven(3):6  TripleBar(4):8  DoubleBar(5):9   SingleBar(6):7  N(12):6   Σ=80 ✅
+//   R4: Seven(3):6  TripleBar(4):8  DoubleBar(5):9   SingleBar(6):7  U(13):6   Σ=80 ✅
+//   R5: Seven(3):7  TripleBar(4):9  DoubleBar(5):8   SingleBar(6):8  S(14):4   Σ=80 ✅
 //
-// Non-paying stops (trigger-only): GoldCoin(10)+Lipstick(12) = 22/80 = 27.5% (+ letter varies 2–6)
-// Paying symbol counts increased to compensate for reduced trigger symbols.
+// H&S trigger:  1-in-95 (11 coins, threshold 6 — fresh-shuffle sim verified)
+// P&C trigger:  ~1-in-1,734 (Lipstick 18/reel unchanged)
+// Diamond 3-oak: more frequent — adds player excitement, ~3% base game RTP increase
 const REEL_FREQUENCIES = [
-  // Reel 1 — BONUS-B (id:10) × 2 | Σ=80
-  // v6l99: Lipstick(8) 12→32 (+20) for P&C trigger ~1-in-98 (half of H&S).
-  // Reductions: Diamond(15) 3→0(-3), Josie(1) 2→1(-1), Straypup(17) 2→1(-1),
-  //   DJ_Maxine(16) 4→2(-2), Seven(3) 8→5(-3), TripleBar(4) 10→7(-3),
-  //   DoubleBar(5) 11→7(-4), SingleBar(6) 8→5(-3). Total removed: 20. Σ=80 ✅
-  { 0:1, 1:1, 2:2, 17:1, 16:2, 3:5, 4:7, 5:7, 6:5, 15:0, 8:32, 9:15, 10:2 },
+  // ── v7.0.5 CALIBRATION ──────────────────────────────────────────────
+  // GoldCoin(9): 15→11 per reel (-4). H&S trigger rate: 1-in-48 → 1-in-95 (target 1-in-80–100).
+  // Compensation: +4 Diamond(15) per reel (4→8). Paying symbol but low value [50,40,30,0].
+  // Lipstick stays at 18/reel → P&C rate unchanged at 1-in-1,734.
+  // Letters stay at original counts → BONUS letter pays unchanged.
+  // Diamond 3-oak wins become more common — adds minor excitement for players.
+  // Estimated base game RTP impact: +3–4%. Owner confirmed Option B, 2026-05-23.
+  // ────────────────────────────────────────────────────────────────────
 
-  // Reel 2 — BONUS-O (id:11) × 4 | Σ=80
-  { 0:1, 1:1, 2:2, 17:1, 16:2, 3:5, 4:7, 5:5, 6:5, 15:0, 8:32, 9:15, 11:4 },
+  // Reel 1 — BONUS-B (id:10) × 2 | Diamond(15): 4→8 | Σ=80 ✅
+  { 0:1, 1:1, 2:2, 17:1, 16:2, 3:7, 4:9, 5:10, 6:8, 15:8, 8:18, 9:11, 10:2 },
 
-  // Reel 3 — BONUS-N (id:12) × 6 | Σ=80
-  { 0:1, 1:1, 2:2, 17:1, 16:2, 3:4, 4:6, 5:6, 6:4, 15:0, 8:32, 9:15, 12:6 },
+  // Reel 2 — BONUS-O (id:11) × 4 | Diamond(15): 4→8 | Σ=80 ✅
+  { 0:1, 1:1, 2:2, 17:1, 16:2, 3:7, 4:9, 5:8,  6:8, 15:8, 8:18, 9:11, 11:4 },
 
-  // Reel 4 — BONUS-U (id:13) × 6 | Σ=80
-  { 0:1, 1:1, 2:2, 17:1, 16:2, 3:4, 4:6, 5:6, 6:4, 15:0, 8:32, 9:15, 13:6 },
+  // Reel 3 — BONUS-N (id:12) × 6 | Diamond(15): 4→8 | Σ=80 ✅
+  { 0:1, 1:1, 2:2, 17:1, 16:2, 3:6, 4:8, 5:9,  6:7, 15:8, 8:18, 9:11, 12:6 },
 
-  // Reel 5 — BONUS-S (id:14) × 4 | Σ=80
-  // S trigger enforcement is via bottom-row check in game.js (M4).
-  { 0:1, 1:1, 2:2, 17:1, 16:2, 3:5, 4:7, 5:5, 6:5, 15:0, 8:32, 9:15, 14:4 },
+  // Reel 4 — BONUS-U (id:13) × 6 | Diamond(15): 4→8 | Σ=80 ✅
+  { 0:1, 1:1, 2:2, 17:1, 16:2, 3:6, 4:8, 5:9,  6:7, 15:8, 8:18, 9:11, 13:6 },
+
+  // Reel 5 — BONUS-S (id:14) × 4 | Diamond(15): 4→8 | Σ=80 ✅
+  { 0:1, 1:1, 2:2, 17:1, 16:2, 3:7, 4:9, 5:8,  6:8, 15:8, 8:18, 9:11, 14:4 },
 ];
 
 function buildReelStrips(frequencies) {
   return frequencies.map(function(freq, reelIdx) {
     var strip = [];
-    Object.entries(freq).forEach(function(_e) {
-      var id = parseInt(_e[0]), count = _e[1];
+    // ES5 rewrite — Object.entries() not safe on Samsung Browser < 6 (v6l111)
+    var _fkeys = Object.keys(freq);
+    for (var _fi = 0; _fi < _fkeys.length; _fi++) {
+      var id = parseInt(_fkeys[_fi]), count = freq[_fkeys[_fi]];
       for (var i = 0; i < count; i++) strip.push(id);
-    });
+    }
     if (strip.length !== REEL_SIZE) {
       console.error('Reel ' + (reelIdx+1) + ' frequency total is ' + strip.length + ', expected ' + REEL_SIZE);
     }
-    var seed = 0xBEEF1234 + reelIdx * 0x9E3779B9;
-    var lcg = function() {
-      seed = Math.imul(seed, 1664525) + 1013904223;
-      return (seed >>> 0) / 0x100000000;
-    };
+    // ── Per-session crypto shuffle (v6l114) ────────────────────────────
+    // Uses crypto.getRandomValues() so every player session gets a unique
+    // reel strip layout. Prevents stop-position reverse engineering.
+    // Owner confirmed 2026-05-21. Symbol frequencies are unchanged — only ordering varies.
+    var _shuffleBuf = new Uint32Array(strip.length);
+    crypto.getRandomValues(_shuffleBuf);
     for (var i = strip.length - 1; i > 0; i--) {
-      var j = Math.floor(lcg() * (i + 1));
+      var j = _shuffleBuf[i] % (i + 1);
       var tmp = strip[i]; strip[i] = strip[j]; strip[j] = tmp;
     }
 
@@ -257,9 +271,9 @@ const REEL_STRIPS = buildReelStrips(REEL_FREQUENCIES);
 // ═══════════════════════════════════════════════════════════════════════
 // PAYLINES
 // ═══════════════════════════════════════════════════════════════════════
-// PAYLINES — VGT Neptune's Gold exact 20-line pattern set (matched 2026-05-16)
+// PAYLINES — BIG MUNNY BIG MUNNY 20-line pattern set (matched 2026-05-16)
 // Row index: 0=Top, 1=Middle, 2=Bottom. All lines pay Left-to-Right.
-// 7 lines replaced from prior set to match Neptune's Gold exactly (Lines 10,11,14,15,18,19,20).
+// 7 lines replaced from prior set to match BIG MUNNY exactly (Lines 10,11,14,15,18,19,20).
 const PAYLINES = [
   [1,1,1,1,1], // Line  1 — Middle Row (straight)
   [0,0,0,0,0], // Line  2 — Top Row (straight)
@@ -270,17 +284,17 @@ const PAYLINES = [
   [0,1,0,1,0], // Line  7 — Low Chevron (Wavy Valley)
   [0,1,1,1,0], // Line  8 — Top-to-Middle Drop
   [2,1,1,1,2], // Line  9 — Bottom-to-Middle Rise
-  [1,2,0,2,1], // Line 10 — M-Shape ★ NEW (Neptune's Gold)
-  [1,0,2,0,1], // Line 11 — W-Shape ★ NEW (Neptune's Gold)
+  [1,2,0,2,1], // Line 10 — M-Shape ★ NEW (BIG MUNNY)
+  [1,0,2,0,1], // Line 11 — W-Shape ★ NEW (BIG MUNNY)
   [0,0,1,0,0], // Line 12 — Top / Middle Wave
   [2,2,1,2,2], // Line 13 — Bottom / Middle Wave
-  [1,1,0,0,0], // Line 14 — Zig-Zag Step Up ★ NEW (Neptune's Gold)
-  [0,0,1,1,1], // Line 15 — Zig-Zag Step Down ★ NEW (Neptune's Gold)
+  [1,1,0,0,0], // Line 14 — Zig-Zag Step Up ★ NEW (BIG MUNNY)
+  [0,0,1,1,1], // Line 15 — Zig-Zag Step Down ★ NEW (BIG MUNNY)
   [1,0,0,0,1], // Line 16 — Mountain Top Flat
   [1,2,2,2,1], // Line 17 — Valley Floor Flat
-  [2,1,1,0,0], // Line 18 — Snake Up ★ NEW (Neptune's Gold)
-  [0,1,1,2,2], // Line 19 — Snake Down ★ NEW (Neptune's Gold)
-  [1,0,1,2,1], // Line 20 — Center Bridge ★ NEW (Neptune's Gold)
+  [2,1,1,0,0], // Line 18 — Snake Up ★ NEW (BIG MUNNY)
+  [0,1,1,2,2], // Line 19 — Snake Down ★ NEW (BIG MUNNY)
+  [1,0,1,2,1], // Line 20 — Center Bridge ★ NEW (BIG MUNNY)
 ];
 
 const LINE_PRESETS = [1, 5, 10, 15, 20];
@@ -310,10 +324,7 @@ const PAYLINE_NAMES = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════
-// BET CONFIGURATION
-// ═══════════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════
-// MLMC BET STRUCTURE — Aristocrat VGT style (Hunt for Neptune's Gold)
+// BET CONFIGURATION — MLMC (Multi-Line Multi-Credit) BIG MUNNY style
 // Total Bet = Denomination × Credits Per Line × Lines Active
 // Win Cash  = Credits Won × Credits Per Line × Denomination
 // ═══════════════════════════════════════════════════════════════════════
@@ -323,7 +334,7 @@ const DENOMINATIONS   = [0.01, 0.02, 0.05, 0.10, 0.25, 0.50, 1.00, 2.00, 3.00, 5
 const DENOM_LABELS    = ['1¢', '2¢', '5¢', '10¢', '25¢', '50¢', '$1', '$2', '$3', '$5']; // $10/$20 removed v6l94
 const DEFAULT_DENOM   = 0.05; // 5¢ default
 
-// Credits per line options (Aristocrat style — skips 4, skips 6-9)
+// Credits per line options (BIG MUNNY style — skips 4, skips 6-9)
 const CREDITS_PER_LINE_OPTIONS = [1, 2, 3, 5]; // J3: max credits/line = 5 (max bet = denom × 5 × 20)
 const DEFAULT_CREDITS_PER_LINE = 1;
 
@@ -437,28 +448,28 @@ const JACKPOT_SPLIT = { MINI: 0.30, MINOR: 0.25, MAJOR: 0.25, GRAND: 0.20 };
 const TARGET_RTP_DEFAULT = 94.0; // 94% — standard casino
 
 // Red Spin: more frequent (was 1/125, now 1/60)
-// BONUS Feature frequency — RNG check fires on EVERY spin (not gated by win).
-// Acts as a redirect lottery: player gets an orb pick leading to H&S, P&C, or RS.
-// Fires independently of the natural bottom-row B-O-N-U-S letter trigger.
-// Target: ~1-in-150 spins — meaningful but rarer than H&S/P&C since it adds
-// another chance at ALL three bonuses simultaneously.
-// Owner confirmed v6l99: "always consider presenting BONUS letters bonus, use game math RTP and RNG"
-const BONUS_FEATURE_FREQ_DEFAULT   = 0.0067; // ~1-in-150 spins per spin
+// BONUS_FEATURE_FREQ_DEFAULT — operator reference value only.
+// The RNG shortcut that fired this every spin was REMOVED v6l100 (caused orb to appear without letters).
+// PERMANENT RULE: BONUS orb fires ONLY from natural bottom-row B-O-N-U-S letter trigger.
+// This constant is kept for operator panel use (future phase) and MC reference. Do NOT connect to game spin loop.
+const BONUS_FEATURE_FREQ_DEFAULT   = 0.0067; // PERMANENTLY DEAD — Rule 23. Reconnecting this to the spin loop is PROHIBITED. See PHASE_PLAN.md v6l100. Fixed v6l111 2026-05-21.
 
-const RED_SPIN_FREQUENCY_DEFAULT  = 0.120; // effective ~1-in-17 all spins (0.120 × ~49.5% win rate ≈ 5.9%) — v6l92 MC target
+const RED_SPIN_FREQUENCY_DEFAULT  = 0.010; // v7.0.4 patch: 0.010 per winning spin → ~1-in-225 all spins (~5.6 min at 40/min) → ~23% RS RTP. Was 0.018 (too high, 42% RS RTP).
 const RED_SPIN_CONTINUANCE_DEFAULT = 0.60; // 60% continue / 40% end — owner confirmed 2026-05-18 (was 0.70)
 
 // ── RED SPIN TIERED VOLATILITY SYSTEM ────────────────────────────────────────
-// Owner confirmed 2026-05-18: 4-tier escalation, continuance-driven advancement
-// Within-tier: 60/40 (same as RED_SPIN_CONTINUANCE_DEFAULT)
-// Tier advancement: 20% when tier exhausts (P(Sisters) = 0.20³ = 0.8% of sequences)
-// Win rules: win >= lastWin (can equal), within tier range, different payline set
-const RED_SPIN_TIER_ADVANCE_PROB = 0.20; // 20% chance to advance tier when current exhausts
+// v7.0.4 REDESIGN — owner confirmed 2026-05-23. New tier ranges aligned to actual
+// reel strip win distribution (500k spin analysis). Old ranges caused premature cascade.
+// Within-tier: 60/40 (same as RED_SPIN_CONTINUANCE_DEFAULT). Spin 1 always guaranteed.
+// Player sees no tier labels — presents as continuous free spin sequence.
+// Advancement (Option C): progressive — harder early, more accessible toward T4.
+// Win rules: win >= lastWin (can equal), within tier range, different payline set.
+const RED_SPIN_TIER_ADVANCE_PROB = [0.20, 0.30, 0.50]; // v7.0.4: [T1→T2, T2→T3, T3→T4]. P(reach T4) = 0.20×0.30×0.50 = 3.0% of sequences. Was scalar 0.20 (P(T4)=0.8%).
 const RED_SPIN_TIERS = [
-  { name: 'SMALL',   minMult:   1, maxMult:   10 }, // 1×–10× totalBet  ($5-$50 at 5c/$5) — bars, mixed bars
-  { name: 'MEDIUM',  minMult:  10, maxMult:   35 }, // 10×–35× totalBet ($50-$175) — char 3-oaks, multi-line bars
-  { name: 'LARGE',   minMult:  35, maxMult:  200 }, // 35×–200× totalBet ($175-$1000) — char 4/5-oaks
-  { name: 'SISTERS', minMult: null, maxMult: null }, // Tier 4: Sisters GRAND only
+  { name: 'SMALL',   minMult:  0.5, maxMult:   4 }, // T1: 0.5×–4× totalBet  — bars, mixed bars, bonus letter pays, low wild combos
+  { name: 'MEDIUM',  minMult:  4,   maxMult:  20 }, // T2: 4×–20× totalBet   — Sevens, Diamonds, char 3-oaks (Josie/Sasha/DJ Maxine), mid wild combos. JP: MINOR if progressive≥3×bet else MINI
+  { name: 'LARGE',   minMult: 20,   maxMult:  50 }, // T3: 20×–50× totalBet  — DJ Maxine 4-5oak, StrayPup, Josie/Sasha 4oak, heavy wild combos. JP: MAJOR
+  { name: 'SISTERS', minMult: 50,   maxMult: 100 }, // T4: 50×–100× totalBet — all five 4oak all-wild combos (50/62.5/75/87.5/100×) then GRAND jackpot
 ];
 
 // JP available per tier — owner confirmed 2026-05-18
@@ -471,11 +482,39 @@ const RED_SPIN_TIERS = [
 
 // Lipstick: 5-oak on center payline (Line 1) triggers Pick & Choose — reel freq controlled above
 
-const HOLD_SPIN_LAND_PROBABILITY  = 0.022; // 2.2% — reduced from 0.055 v6l92 to target 8-9% H&S RTP
+// ── HOLD & SPIN TRIGGER ──────────────────────────────────────────────────
+// Minimum Gold Coins visible in the 5×3 grid to trigger Hold & Spin.
+// Named constant so game.js and tools always stay in sync with paytable.
+const HOLD_SPIN_MIN_COINS = 6; // owner confirmed — threshold stays at 6 coins (v7.0.5)
+
+const HOLD_SPIN_LAND_PROBABILITY  = 0.022; // 2.2% per empty cell per respin — unchanged
 
 // ═══════════════════════════════════════════════════════════════════════
-// RTP CALCULATOR
+// HOLD & SPIN COIN TIERS (v7.0.5 — recalibrated, 5-tier compressed design)
+// All values scale with totalBet. Target avg coin: 0.33× totalBet.
+// Cash tier weights sum to 1.0 — one tier always fires on a non-JP roll.
+// JP tiers evaluated first (1.83% total); cash tiers evaluated independently.
+// Target H&S RTP: ~5.1% (cash 2.76% + entry JP 2.06% + per-coin JP 0.29%)
+// Owner confirmed 2026-05-23.
 // ═══════════════════════════════════════════════════════════════════════
+const HOLD_SPIN_CASH_TIERS = [
+  { weight:0.45, minFrac:0.02, maxFrac:0.08 }, // 45% — tiny   (2–8%   of bet)  avg $0.05
+  { weight:0.28, minFrac:0.08, maxFrac:0.25 }, // 28% — small  (8–25%  of bet)  avg $0.165
+  { weight:0.16, minFrac:0.25, maxFrac:0.70 }, // 16% — medium (25–70% of bet)  avg $0.475
+  { weight:0.08, minFrac:0.70, maxFrac:1.80 }, //  8% — large  (70–180% of bet) avg $1.25
+  { weight:0.03, minFrac:1.80, maxFrac:4.00 }, //  3% — big    (180–400% of bet) avg $2.90 ← rare
+];
+// v7.0.5 — per-coin JP weights reduced ~50× from v7.0.4 to decorative-rarity level.
+// Primary jackpots awarded via unified entry check (Option X guaranteed coin injection).
+// Per-coin weights keep both layers alive per owner intent but prevent RTP blowout.
+const HOLD_SPIN_JACKPOT_TIERS = [
+  { level:'MINI',  weight:0.00015  }, // 1-in-6,667 coins  — 1-in-889 sessions (was 0.008 = 1-in-16)
+  { level:'MINOR', weight:0.00005  }, // 1-in-20,000 coins — 1-in-2,667 sessions (was 0.003)
+  { level:'MAJOR', weight:0.00002  }, // 1-in-50,000 coins — 1-in-6,667 sessions (was 0.0008)
+  { level:'GRAND', weight:0.000005 }, // 1-in-200,000 coins — very rare surprise (was 0.0002)
+];
+// Near-miss boost reduced 1.8→1.3. Still exciting on counter=1 landings.
+const HOLD_SPIN_NEAR_MISS_BOOST = 1.3; // v7.0.5: down from 1.8 to reduce cash inflation
 function calculateTheoreticalRTP(lines) {
   if (lines === undefined) lines = 20;
   var totalReturn = 0;
@@ -507,36 +546,9 @@ function calculateTheoreticalRTP(lines) {
   });
   // NOTE: Lipstick [0,0,0,0] — bonus trigger only, no payline pay (owner-confirmed 2026-05-18).
   // 5-oak triggers Pick & Choose. Bonus RTP not included in this theoretical calculation.
-  console.log('Theoretical RTP (' + lines + ' lines): ' + (totalReturn*100).toFixed(2) + '%');
+  // Uncomment to log: console.warn('Theoretical RTP (' + lines + ' lines):', (totalReturn*100).toFixed(2) + '%');
   return totalReturn;
 }
-
-// ═══════════════════════════════════════════════════════════════════════
-// HOLD & SPIN COIN TIERS
-// All values scale with totalBet (betPerLine × linesActive) — higher bets = higher coins.
-// Fractions are of totalBet. E.g. at $1 total bet: tiny tier = $0.02–$0.10.
-//                              At $10 total bet:  tiny tier = $0.20–$1.00.
-// Cash tier weights must sum to 0.996667 (1 minus sum of jackpot weights = 0.003333 total JP).
-// Monte Carlo verified: 8.58–8.66% H&S RTP contribution across all 6 denoms.
-// ═══════════════════════════════════════════════════════════════════════
-const HOLD_SPIN_CASH_TIERS = [
-  { weight:0.40, minFrac:0.03, maxFrac:0.12 }, // 40% — tiny   (3–12% of bet)
-  { weight:0.25, minFrac:0.12, maxFrac:0.35 }, // 25% — small  (12–35% of bet)
-  { weight:0.14, minFrac:0.35, maxFrac:0.85 }, // 14% — medium (35–85% of bet)
-  { weight:0.08, minFrac:0.85, maxFrac:2.50 }, //  8% — large  (85%–2.5× bet)
-  { weight:0.04, minFrac:2.50, maxFrac:6.00 }, //  4% — big    (2.5–6× bet)
-  { weight:0.01, minFrac:6.00, maxFrac:15.0 }, //  1% — huge   (6–15× bet) — rare big coin
-];
-const HOLD_SPIN_JACKPOT_TIERS = [
-  { level:'MINI',  weight:0.008  }, // ~1-in-20  H&S bonuses — visible often enough to excite
-  { level:'MINOR', weight:0.003  }, // ~1-in-50  H&S bonuses
-  { level:'MAJOR', weight:0.0008 }, // ~1-in-200 H&S bonuses
-  { level:'GRAND', weight:0.0002 }, // ~1-in-700 H&S bonuses — rare, special
-];
-
-// Near-miss cash multiplier — when counter = 1 and a coin lands, its value is boosted
-// Rewards the player for the tension of the last-spin recovery
-const HOLD_SPIN_NEAR_MISS_BOOST = 1.8; // 1.8× normal cash value on counter=1 landings
 
 // ═══════════════════════════════════════════════════════════════════════
 // PICK & CHOOSE PRIZES
@@ -552,14 +564,18 @@ const PICK_CHOOSE_CASH_TIERS = [
   { minMult:75, maxMult:150 },  // tier 2 — large
 ];
 const PICK_CHOOSE_PRIZES = [
-  { type:'cash',      weight:0.40 }, // cash — random tier
-  { type:'cash',      weight:0.20 }, // cash — random tier (second entry = second roll bucket)
-  { type:'hold_spin', weight:0.14 },
-  { type:'red_spin',  weight:0.12 },
-  { type:'mini',      weight:0.07 },
-  { type:'minor',     weight:0.04 },
-  { type:'major',     weight:0.02 },
-  { type:'grand',     weight:0.01 },
+  // v6l100 calibration — owner approved 2026-05-21.
+  // H&S: 14%→8%, RS: 12%→6% (less expensive bonus routing).
+  // Cash boosted to compensate. MINOR/MAJOR slightly increased.
+  // RULE: Any change here MUST also update bonuses.js PRIZE_WEIGHTS.
+  { type:'cash',      weight:0.48 }, // 48% cash (was 40%)
+  { type:'cash',      weight:0.22 }, // 22% cash (was 20%)
+  { type:'hold_spin', weight:0.08 }, // 8%  H&S  (was 14%)
+  { type:'red_spin',  weight:0.06 }, // 6%  RS   (was 12%)
+  { type:'mini',      weight:0.07 }, // 7%  MINI
+  { type:'minor',     weight:0.05 }, // 5%  MINOR (was 4%)
+  { type:'major',     weight:0.03 }, // 3%  MAJOR (was 2%)
+  { type:'grand',     weight:0.01 }, // 1%  GRAND
 ];
 
 const PICK_CHOOSE_GRID_SIZE = 15;
@@ -578,7 +594,7 @@ function generateSerialNumber() {
 
 if (typeof module !== 'undefined') module.exports = {
   SYMBOLS, SYMBOL_BY_ID, WILD_IDS, BONUS_PC_ID, BONUS_ID,
-  PAY_TABLE, PAY_TABLE_BY_DENOM, getPayTableForDenom, WILD_MULTIPLIERS,
+  PAY_TABLE, PAY_TABLE_BY_DENOM, getPayTableForDenom,
   LETTER_IDS, LETTER_ORDER, BONUS_LETTER_PAYS,
   MIXED_BAR_PAY, BAR_IDS,
   REEL_STRIPS, REEL_FREQUENCIES, REEL_SIZE, PAYLINES, PAYLINE_NAMES, LINE_PRESETS,
@@ -592,7 +608,7 @@ if (typeof module !== 'undefined') module.exports = {
   TARGET_RTP_DEFAULT, BONUS_FEATURE_FREQ_DEFAULT,
   RED_SPIN_FREQUENCY_DEFAULT, RED_SPIN_CONTINUANCE_DEFAULT,
   RED_SPIN_TIERS, RED_SPIN_TIER_ADVANCE_PROB,
-  HOLD_SPIN_LAND_PROBABILITY, HOLD_SPIN_CASH_TIERS, HOLD_SPIN_JACKPOT_TIERS, HOLD_SPIN_NEAR_MISS_BOOST,
+  HOLD_SPIN_MIN_COINS, HOLD_SPIN_LAND_PROBABILITY, HOLD_SPIN_CASH_TIERS, HOLD_SPIN_JACKPOT_TIERS, HOLD_SPIN_NEAR_MISS_BOOST,
   PICK_CHOOSE_CASH_TIERS, PICK_CHOOSE_PRIZES, PICK_CHOOSE_GRID_SIZE,
   generateSerialNumber, calculateTheoreticalRTP,
 };

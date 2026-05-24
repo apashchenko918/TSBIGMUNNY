@@ -6,21 +6,21 @@
  * NOT redeemable for real cash — entertainment purposes only.
  */
 
-const CashOut = (function() {
-  const CASINO_NAME   = 'Lucky Bitches Casino';
-  const VOUCHER_KEY   = 'turrelleSisters_vouchers_v1';
-  const VOUCHER_PREFIX= 'LBC';
+var CashOut = (function() {
+  var CASINO_NAME   = 'Lucky Bitches Casino';
+  var VOUCHER_KEY   = 'turrelleSisters_vouchers_v1';
+  var VOUCHER_PREFIX= 'LBC';
 
   // These MUST be declared — strict mode throws ReferenceError on undeclared assignment
-  let insertCashFlashInterval = null;
-  let insertCashFlashTimer    = null;
+  var insertCashFlashInterval = null;
+  var insertCashFlashTimer    = null;
 
 
 
   // ── VOUCHER STORAGE ────────────────────────────────────────────────
   function loadVouchers() {
     try {
-      const raw = localStorage.getItem(VOUCHER_KEY);
+      var raw = localStorage.getItem(VOUCHER_KEY);
       return raw ? JSON.parse(raw) : [];
     } catch(e) { return []; }
   }
@@ -31,9 +31,9 @@ const CashOut = (function() {
   }
 
   function generateVoucherId() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let id = VOUCHER_PREFIX + '-';
-    for (let i = 0; i < 8; i++) {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    var id = VOUCHER_PREFIX + '-';
+    for (var i = 0; i < 8; i++) {
       id += chars[Math.floor(Math.random() * chars.length)];
       if (i === 3) id += '-';
     }
@@ -52,14 +52,14 @@ const CashOut = (function() {
       UI.showToast('Finish current game before cashing out.');
       return;
     }
-    const amount = GameState.balance;
+    var amount = GameState.balance;
     if (amount <= 0) {
       UI.showToast('No credits to cash out.');
       return;
     }
 
     // Create voucher
-    const voucher = {
+    var voucher = {
       id:        generateVoucherId(),
       serialNumber: typeof _currentSpinSerial !== 'undefined' ? _currentSpinSerial : generateSerialNumber(),
       amount:    Math.round(amount * 100) / 100,
@@ -69,7 +69,7 @@ const CashOut = (function() {
     };
 
     // Save voucher
-    const vouchers = loadVouchers();
+    var vouchers = loadVouchers();
     vouchers.unshift(voucher);
     saveVouchers(vouchers);
 
@@ -103,34 +103,34 @@ const CashOut = (function() {
   }
 
   function showCreateVoucherModal() {
-    const modal = document.getElementById('create-voucher-modal');
+    var modal = document.getElementById('create-voucher-modal');
     if (modal) modal.classList.add('active');
   }
 
   function hideCreateVoucherModal() {
-    const modal = document.getElementById('create-voucher-modal');
+    var modal = document.getElementById('create-voucher-modal');
     if (modal) modal.classList.remove('active');
-    const input = document.getElementById('cv-amount-input');
+    var input = document.getElementById('cv-amount-input');
     if (input) input.value = '';
   }
 
   function confirmCreateVoucher() {
-    const input = document.getElementById('cv-amount-input');
+    var input = document.getElementById('cv-amount-input');
     if (!input) return;
-    const amount = parseFloat(input.value);
+    var amount = parseFloat(input.value);
     if (isNaN(amount) || amount <= 0) {
-      const err = document.getElementById('cv-error');
+      var err = document.getElementById('cv-error');
       if (err) { err.textContent = 'Please enter a valid amount'; err.style.display = 'block'; }
       return;
     }
-    const voucher = {
+    var voucher = {
       id:        generateVoucherId(),
       amount:    Math.round(amount * 100) / 100,
       issuedAt:  Date.now(),
       issuedStr: formatTimestamp(Date.now()),
       status:    'active',
     };
-    const vouchers = loadVouchers();
+    var vouchers = loadVouchers();
     vouchers.unshift(voucher);
     saveVouchers(vouchers);
     logEvent('VOUCHER_CREATED', {
@@ -228,7 +228,7 @@ const CashOut = (function() {
   function stopZeroBalanceFlash() {
     clearInterval(insertCashFlashInterval);
     clearTimeout(insertCashFlashTimer);
-    const el = document.getElementById('zero-balance-msg');
+    var el = document.getElementById('zero-balance-msg');
     if (el) el.classList.remove('visible');
   }
 
@@ -239,14 +239,14 @@ const CashOut = (function() {
 
   // ── VOUCHER MODAL ──────────────────────────────────────────────────
   function showVoucherModal(voucher) {
-    const modal = document.getElementById('voucher-modal');
+    var modal = document.getElementById('voucher-modal');
     if (!modal) return;
 
     document.getElementById('vm-casino').textContent   = CASINO_NAME;
     document.getElementById('vm-amount').textContent   = '$' + voucher.amount.toFixed(2);
     document.getElementById('vm-id').textContent       = voucher.id;
     document.getElementById('vm-issued').textContent   = voucher.issuedStr;
-    const serialEl = document.getElementById('vm-serial');
+    var serialEl = document.getElementById('vm-serial');
     if (serialEl) serialEl.textContent = voucher.serialNumber || '---';
 
     var bars = document.getElementById('vm-barcode');
@@ -271,8 +271,8 @@ const CashOut = (function() {
 
   // ── WALLET MODAL ───────────────────────────────────────────────────
   function showWalletModal(vouchers) {
-    const modal   = document.getElementById('wallet-modal');
-    const listEl  = document.getElementById('wallet-list');
+    var modal   = document.getElementById('wallet-modal');
+    var listEl  = document.getElementById('wallet-list');
     if (!modal || !listEl) return;
 
     listEl.innerHTML = '';
@@ -336,15 +336,15 @@ const CashOut = (function() {
   }
 
   return {
-    init,
-    doCashOut,
-    doCreateVoucher,
-    doCashOutAmount,
-    doInsertCash,
-    redeemVoucher,
-    checkZeroBalance,
-    startZeroBalanceFlash,
-    stopZeroBalanceFlash,
-    loadVouchers,
+    init:                init,
+    doCashOut:           doCashOut,
+    doCreateVoucher:     doCreateVoucher,
+    doCashOutAmount:     doCashOutAmount,
+    doInsertCash:        doInsertCash,
+    redeemVoucher:       redeemVoucher,
+    checkZeroBalance:    checkZeroBalance,
+    startZeroBalanceFlash: startZeroBalanceFlash,
+    stopZeroBalanceFlash:  stopZeroBalanceFlash,
+    loadVouchers:        loadVouchers,
   };
 })();

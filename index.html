@@ -11,7 +11,23 @@
     // MANDATORY RULE: Update GAME_VERSION on every build alongside CACHE_NAME.
     // This is displayed on the splash screen and used for cache validation.
     // Never deliver a zip with a stale GAME_VERSION.
-    var GAME_VERSION = 'v6l99';
+    var GAME_VERSION = 'v7.0.6';
+
+    // ── SPIN LOCK SAFETY NET ──────────────────────────────────────────
+    // If executeSpin() throws an uncaught promise rejection, spinInProgress
+    // would stay true forever — locking the game. This handler rescues it.
+    window.addEventListener('unhandledrejection', function(e) {
+      console.error('[Game] Unhandled rejection:', e.reason);
+      if (typeof GameState !== 'undefined' && GameState.spinInProgress) {
+        GameState.spinInProgress = false;
+        GameState.activeBonus    = null;
+        if (typeof UI !== 'undefined') {
+          UI.setControlsEnabled(true);
+          UI.showToast('Error occurred — please spin again');
+        }
+        console.warn('[Game] spinInProgress rescued by global error handler');
+      }
+    });
 
     (function() {
       // 1. Delete ALL cache API entries so SW always re-fetches on version change
@@ -68,7 +84,7 @@
 <meta name="format-detection" content="telephone=no">
 <title>The Turrelle Sisters Big Munny</title>
 <link rel="icon" href="assets/icons/icon-96x96.png">
-<link rel="stylesheet" href="style.css?v=6l93">
+<link rel="stylesheet" href="style.css?v=7.0.0">
 <style>
 /* ── INSERT CASH TO PLAY — reel overlay msg ── */
 #reels-insert-msg {
@@ -194,7 +210,7 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 #update-banner.show{display:block;}
 </style>
 </head>
-<body>
+<body class="desktop-gutter-c">
 
 <!-- ── SPLASH SCREEN ── -->
 <div id="splash-screen">
@@ -251,12 +267,7 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
   </div>
   <div id="win-line-label"></div>
 
-  <!-- VOLUME BAR -->
-  <div id="volume-bar">
-    <button id="mute-btn">🔊</button>
-    <input id="vol-slider" type="range" min="0" max="100" value="70">
-    <span id="vol-label">70%</span>
-  </div>
+  <!-- VOLUME BAR REMOVED v7.0.6 — volume controls removed per owner; level fixed at 50% in audio.js -->
 
   <!-- INFO BAR -->
   <div id="info-bar">
@@ -264,7 +275,7 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
     <div class="info-item"><div class="info-label">TOTAL BET</div><div class="info-value" id="total-bet-val">$0.05</div></div>
     <div class="info-item"><div class="info-label">LINES</div><div class="info-value" id="lines-display">20</div></div>
   </div>
-  <!-- CONTROLS — MLMC Aristocrat VGT style -->
+  <!-- CONTROLS — MLMC BIG MUNNY style -->
   <div id="controls">
 
     <!-- Row 1: Denomination selector (dropdown) -->
@@ -288,7 +299,7 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
       </div>
     </div>
 
-    <!-- Neptune's Gold style bet panel: BET ONE cycles lines 1-20, BET MAX = 20 lines -->
+    <!-- BIG MUNNY style bet panel: BET ONE cycles lines 1-20, BET MAX = 20 lines -->
     <div id="bet-panel">
       <div id="bet-display">
         <div class="bet-stat"><span class="bet-label">LINES</span><span id="lines-display2">20</span></div>
@@ -327,9 +338,9 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 <div id="hold-screen">
   <div class="bonus-jp-bar" id="hold-jp-bar">
     <div class="bonus-jp-meter grand"><div class="bonus-jp-label">GRAND</div><div class="bonus-jp-amount" id="hold-jp-grand">$2000.00</div></div>
-    <div class="bonus-jp-meter"><div class="bonus-jp-label">MAJOR</div><div class="bonus-jp-amount" id="hold-jp-major">$100.00</div></div>
-    <div class="bonus-jp-meter"><div class="bonus-jp-label">MINOR</div><div class="bonus-jp-amount" id="hold-jp-minor">$50.00</div></div>
-    <div class="bonus-jp-meter"><div class="bonus-jp-label">MINI</div><div class="bonus-jp-amount" id="hold-jp-mini">$25.00</div></div>
+    <div class="bonus-jp-meter major"><div class="bonus-jp-label">MAJOR</div><div class="bonus-jp-amount" id="hold-jp-major">$100.00</div></div>
+    <div class="bonus-jp-meter minor"><div class="bonus-jp-label">MINOR</div><div class="bonus-jp-amount" id="hold-jp-minor">$50.00</div></div>
+    <div class="bonus-jp-meter mini"><div class="bonus-jp-label">MINI</div><div class="bonus-jp-amount" id="hold-jp-mini">$25.00</div></div>
   </div>
   <div id="hold-title">HOLD &amp; SPIN</div>
   <div id="hold-board"></div>
@@ -340,9 +351,9 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 <div id="pick-screen">
   <div class="bonus-jp-bar" id="pick-jp-bar">
     <div class="bonus-jp-meter grand"><div class="bonus-jp-label">GRAND</div><div class="bonus-jp-amount" id="pick-jp-grand">$2000.00</div></div>
-    <div class="bonus-jp-meter"><div class="bonus-jp-label">MAJOR</div><div class="bonus-jp-amount" id="pick-jp-major">$100.00</div></div>
-    <div class="bonus-jp-meter"><div class="bonus-jp-label">MINOR</div><div class="bonus-jp-amount" id="pick-jp-minor">$50.00</div></div>
-    <div class="bonus-jp-meter"><div class="bonus-jp-label">MINI</div><div class="bonus-jp-amount" id="pick-jp-mini">$25.00</div></div>
+    <div class="bonus-jp-meter major"><div class="bonus-jp-label">MAJOR</div><div class="bonus-jp-amount" id="pick-jp-major">$100.00</div></div>
+    <div class="bonus-jp-meter minor"><div class="bonus-jp-label">MINOR</div><div class="bonus-jp-amount" id="pick-jp-minor">$50.00</div></div>
+    <div class="bonus-jp-meter mini"><div class="bonus-jp-label">MINI</div><div class="bonus-jp-amount" id="pick-jp-mini">$25.00</div></div>
   </div>
   <div id="pick-title">💄 PICK &amp; CHOOSE 💄</div>
   <div id="pick-subtitle">Tap tiles — match 3 to win!</div>
@@ -495,14 +506,14 @@ html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 
 
 <!-- SCRIPTS — load order matters -->
-<script src="paytable.js?v=6l59"></script>
-<script src="state.js?v=6l59"></script>
-<script src="audio.js?v=6l59"></script>
-<script src="game.js?v=6l59"></script>
-<script src="bonuses.js?v=6l59"></script>
-<script src="ui.js?v=6l59"></script>
-<script src="operator.js?v=6l59"></script>
-<script src="cashout.js?v=6l59"></script>
+<script src="paytable.js?v=7.0.0"></script>
+<script src="state.js?v=7.0.0"></script>
+<script src="audio.js?v=7.0.0"></script>
+<script src="game.js?v=7.0.0"></script>
+<script src="bonuses.js?v=7.0.0"></script>
+<script src="ui.js?v=7.0.0"></script>
+<script src="operator.js?v=7.0.0"></script>
+<script src="cashout.js?v=7.0.0"></script>
 
 <script>
 'use strict';
@@ -650,7 +661,7 @@ window.addEventListener('popstate', function(e) {
 });
 
 // ══════════════════════════════════════════════════════════════════════
-// MAIN GAME INIT — MLMC Aristocrat VGT style
+// MAIN GAME INIT — MLMC BIG MUNNY style
 // ══════════════════════════════════════════════════════════════════════
 (function(){
   function $(id) { return document.getElementById(id); }
@@ -687,10 +698,19 @@ window.addEventListener('popstate', function(e) {
 
   // Re-acquire on visibility change (wake lock is released when tab hides)
   document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'visible' && GameState.activeBonus) {
+    if (document.visibilityState === 'visible' && (GameState.activeBonus || GameState.spinInProgress)) {
       _acquireWakeLock();
     }
   });
+
+  // v7.0.6: Periodic re-acquisition every 15s during active bonus or spin.
+  // The Screen Wake Lock API can expire or be released by the OS mid-bonus
+  // (H&S, RS, P&C can run for minutes). This keeps the screen alive throughout.
+  setInterval(function() {
+    if (typeof GameState !== 'undefined' && (GameState.activeBonus || GameState.spinInProgress)) {
+      _acquireWakeLock();
+    }
+  }, 15000);
 
   // MLMC state
   var denom          = DEFAULT_DENOM;           // current denomination
@@ -883,25 +903,10 @@ window.addEventListener('popstate', function(e) {
     GameState.lastCreditsPerLine = creditsPerLine;
   }
 
-  // ── VOLUME ────────────────────────────────────────────────────────
-  function initVolume() {
-    var slider=$('vol-slider'), muteBtn=$('mute-btn'), label=$('vol-label');
-    if (!slider) return;
-    slider.style.setProperty('--vol','70%');
-    slider.addEventListener('input', function() {
-      var v = parseInt(slider.value);
-      Audio.setVolume(v / 100);
-      if (label) label.textContent = v + '%';
-      slider.style.setProperty('--vol', v + '%');
-      if (muteBtn) { muteBtn.textContent = v===0?'🔇':'🔊'; muteBtn.classList.toggle('muted',v===0); }
-    });
-    if (muteBtn) muteBtn.addEventListener('click', function() {
-      var muted = Audio.toggleMute();
-      muteBtn.textContent = muted?'🔇':'🔊';
-      muteBtn.classList.toggle('muted',muted);
-      if (label) label.textContent = muted?'OFF':parseInt(slider.value)+'%';
-    });
-  }
+  // ── VOLUME (v7.0.6) ───────────────────────────────────────────────
+  // Player volume controls removed per owner. Volume fixed at 50% in audio.js.
+  // setVolume/toggleMute/getMuted remain in audio.js for internal/operator use.
+  function initVolume() { /* controls removed v7.0.6 */ }
 
   // ── BET PANEL — SELECT LINES cycles active lines ─────────────────
   // SELECT LINES: 5 → 10 → 15 → 20 → back to 5. Minimum 5 lines (owner-confirmed 2026-05-18).
@@ -987,31 +992,33 @@ window.addEventListener('popstate', function(e) {
   });
 
   // ── SPIN + SKIP — 2-tap rule ─────────────────────────────────────
-  // Tap 1: If animations running → complete them (skip to end of current spin result)
+  // Tap 1: If animations running → skip to end of current spin result
   // Tap 2: Once animations done and spin idle → start next spin
-  // This prevents player disputes from accidental double-tap
-  var _animationsSkipped = false; // tracks if tap1 already fired
+  // v7.0.6: audio plays on EVERY tap (was silent on skip-tap)
+  var _animationsSkipped = false;
 
   var _sb=$('spin-btn'); if(_sb) _sb.addEventListener('click', function() {
     // Active bonus — ignore spin button
     if (GameState.activeBonus) return;
 
-    // Tap 1A: Credit countup animation → skip it (not queuing next spin yet)
+    // Tap 1A: Credit countup animation → skip it
     if (UI.isAnimatingCredits) {
+      Audio.play('button_click');
       UI.skipCreditAnimation();
       _animationsSkipped = true;
       return;
     }
 
-    // Tap 1B: Payline animations running → skip to end, show final result
-    // Do NOT start next spin yet — player must tap again
+    // Tap 1B: Payline animations running → skip, show final result
+    // Audio plays here too — was silent before v7.0.6
     if (GameState.spinInProgress) {
+      Audio.play('button_click');
       if (typeof setSkipPaylineAnimations !== 'undefined') setSkipPaylineAnimations(true);
       _animationsSkipped = true;
-      return; // Wait for 2nd tap to start next spin
+      return;
     }
 
-    // Spin is idle — start next spin (this is always safe as tap 2)
+    // Spin is idle — start next spin
     _animationsSkipped = false;
     doSpin();
   });
@@ -1169,7 +1176,16 @@ window.addEventListener('popstate', function(e) {
     }
   });
 
-  // ── EXIT BUTTON — returns player to splash screen ───────────────────
+  // ── EXIT BUTTON — returns to launcher if available, else splash screen ──
+  // LAUNCHER_RETURN_URL: set to the launcher path when game is launched from
+  // the QA launcher. Empty string = standalone mode (original splash behaviour).
+  // This var is intentionally var (not const) and ES5 — Rule 14 compliance.
+  var LAUNCHER_RETURN_URL = '';
+  try {
+    var _stored = sessionStorage.getItem('__turrelle_launcher_url');
+    if (_stored) { LAUNCHER_RETURN_URL = _stored; }
+  } catch(e) {}
+
   var _eb=$('exit-btn'); if(_eb) _eb.addEventListener('click', function() {
     if (GameState.spinInProgress || GameState.activeBonus) {
       UI.showToast('Please wait for current game to finish');
@@ -1177,7 +1193,12 @@ window.addEventListener('popstate', function(e) {
     }
     saveState();
     Audio.stopAmbientMusic();
-    // Show splash screen — player can tap to re-enter game
+    // If launched from QA launcher — return to it
+    if (LAUNCHER_RETURN_URL) {
+      window.location.href = LAUNCHER_RETURN_URL;
+      return;
+    }
+    // Standalone mode — show splash screen so player can tap back in
     var splash = document.getElementById('splash-screen');
     var gameWrap = document.getElementById('game-wrap');
     if (splash && gameWrap) {

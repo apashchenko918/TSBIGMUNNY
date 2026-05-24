@@ -20,8 +20,13 @@ var UI = (function() {
   function resizeCanvas() {
     var frame = $('reel-frame');
     if (!frame || !paylineCanvas) return;
-    paylineCanvas.width  = frame.offsetWidth;
-    paylineCanvas.height = frame.offsetHeight;
+    // Use clientWidth/clientHeight (excludes border) so canvas coords match
+    // the CSS pixel space of the cells inside the frame. offsetWidth includes
+    // the 3px border on each side, which would create a 1.5% scale mismatch.
+    var cw = frame.clientWidth, ch = frame.clientHeight;
+    if (cw === 0 || ch === 0) { setTimeout(resizeCanvas, 100); return; }
+    if (paylineCanvas.width  !== cw) paylineCanvas.width  = cw;
+    if (paylineCanvas.height !== ch) paylineCanvas.height = ch;
   }
 
   function _roundCoinValue(raw) { return Math.round(raw); }
@@ -328,6 +333,7 @@ var UI = (function() {
     var wins = result.paylineWins || [];
     if (!wins.length && !result.scatterWin) return;
 
+    // ── Phase 1: Show all wins simultaneously ────────────────────────
     if (!_skipRequested()) {
       for (var wi = 0; wi < wins.length; wi++) {
         drawPayline(wins[wi].lineIndex, wins[wi].line, wins[wi].isLetter);
@@ -335,60 +341,127 @@ var UI = (function() {
       }
       if (result.scatterWin) flashScatters();
       updateWinDisplay(result.totalWin);
-      var p1 = fast ? 400 : isReplay ? 500 : 1000;
-      for (var i1 = 0; i1 < 5; i1++) {
+      var p1 = fast ? 350 : isReplay ? 500 : 800;
+      for (var i1 = 0; i1 < 4; i1++) {
         if (!isReplay && _skipRequested()) { clearPaylines(); clearHighlights(); return; }
-        await delay(Math.ceil(p1 / 5));
+        await delay(Math.ceil(p1 / 4));
       }
       clearPaylines(); clearHighlights();
     }
 
-    if (!fast) {
-      var sortedWins = wins.slice().sort(function(a, b) { return a.amount - b.amount; });
-      for (var si = 0; si < sortedWins.length; si++) {
-        var win = sortedWins[si];
-        if (!isReplay && _skipRequested()) { clearPaylines(); clearHighlights(); return; }
-        drawPayline(win.lineIndex, win.line, win.isLetter);
-        flashCells(win.line, win.count);
-        updateWinDisplay(win.amount);
-        var p2 = isReplay ? 400 : 700;
-        for (var i2 = 0; i2 < 4; i2++) {
-          if (!isReplay && _skipRequested()) break;
-          await delay(Math.ceil(p2 / 4));
+    if (fast || isReplay) {
+      // Bonus triggered or replay — one-shot only, don't loop
+      if (fast) return;
+      // Replay: brief individual cycle
+      var sortedR = wins.slice().sort(function(a, b) { return a.amount - b.amount; });
+      for (var ri = 0; ri < sortedR.length; ri++) {
+        var rw = sortedR[ri];
+        if (_skipRequested()) { clearPaylines(); clearHighlights(); return; }
+        drawPayline(rw.lineIndex, rw.line, rw.isLetter);
+        flashCells(rw.line, rw.count);
+        updateWinDisplay(rw.amount);
+        for (var rj = 0; rj < 4; rj++) {
+          if (_skipRequested()) break;
+          await delay(100);
         }
         clearPaylines(); clearHighlights();
       }
+      if (!_skipRequested()) updateWinDisplay(result.totalWin);
+      return;
+    }
+
+    // ── Phase 2: LOOP — cycle through wins until player presses spin ─
+    // v7.0.3: loops indefinitely so player sees their winning lines clearly.
+    // Each iteration: all-at-once flash → cycle each win → repeat.
+    // Broken immediately when _skipRequested() (spin button tap).
+    var sortedWins = wins.slice().sort(function(a, b) { return a.amount - b.amount; });
+
+    while (!_skipRequested()) {
+      // All wins simultaneously (brief flash)
+      for (var aw = 0; aw < wins.length; aw++) {
+        drawPayline(wins[aw].lineIndex, wins[aw].line, wins[aw].isLetter);
+        flashCells(wins[aw].line, wins[aw].count);
+      }
+      if (result.scatterWin) flashScatters();
+      updateWinDisplay(result.totalWin);
+      for (var af = 0; af < 4; af++) {
+        if (_skipRequested()) break;
+        await delay(130);
+      }
+      clearPaylines(); clearHighlights();
+      if (_skipRequested()) break;
+
+      // Cycle each win individually
+      for (var si = 0; si < sortedWins.length; si++) {
+        if (_skipRequested()) break;
+        var win = sortedWins[si];
+        drawPayline(win.lineIndex, win.line, win.isLetter);
+        flashCells(win.line, win.count);
+        updateWinDisplay(win.amount);
+        for (var ii = 0; ii < 4; ii++) {
+          if (_skipRequested()) break;
+          await delay(110); // 440ms per win — responsive to skip tap
+        }
+        clearPaylines(); clearHighlights();
+      }
+
       if (result.scatterWin && !_skipRequested()) {
         flashScatters();
         updateWinDisplay(result.scatterWin);
-        for (var i3 = 0; i3 < 4; i3++) {
-          if (!isReplay && _skipRequested()) break;
-          await delay(isReplay ? 100 : 175);
+        for (var sf = 0; sf < 3; sf++) {
+          if (_skipRequested()) break;
+          await delay(130);
         }
         clearPaylines(); clearHighlights();
       }
     }
-    if (!_skipRequested()) updateWinDisplay(result.totalWin);
+
+    clearPaylines(); clearHighlights();
+    updateWinDisplay(result.totalWin);
   }
 
   function drawPayline(lineIndex, line, isLetter) {
     if (!paylineCtx || !line) return;
-    var frame = $('reel-frame');
-    if (!frame) return;
     resizeCanvas();
-    var cw = frame.offsetWidth / 5;
-    var ch = frame.offsetHeight / 3;
+    if (!paylineCanvas || paylineCanvas.width === 0) return;
+
+    // v7.0.2 FIX: use getBoundingClientRect on the actual sc-col-row cell elements
+    // instead of arithmetic (frame.offsetWidth/5). The arithmetic ignored #reels
+    // padding:4px and gap:3px between reels, causing lines to miss cell centers.
+    // Canvas coordinate space matches clientWidth/clientHeight (after resizeCanvas fix),
+    // so subtracting the canvas's own rect gives pixel-accurate canvas coordinates.
+    var canvasRect = paylineCanvas.getBoundingClientRect();
+    if (!canvasRect || canvasRect.width === 0) return;
+    // Scale from CSS pixels to canvas element pixels (should be 1:1 after resizeCanvas fix)
+    var scaleX = paylineCanvas.width  / canvasRect.width;
+    var scaleY = paylineCanvas.height / canvasRect.height;
+
     paylineCtx.beginPath();
     var color = isLetter ? '#f5d878' : PAYLINE_COLORS[lineIndex % PAYLINE_COLORS.length];
     paylineCtx.strokeStyle = color;
-    paylineCtx.lineWidth   = isLetter ? 4 : 3;
+    paylineCtx.lineWidth   = (isLetter ? 4 : 3) * Math.max(scaleX, scaleY);
     paylineCtx.shadowColor = color;
-    paylineCtx.shadowBlur  = isLetter ? 14 : 10;
+    paylineCtx.shadowBlur  = (isLetter ? 14 : 10) * Math.max(scaleX, scaleY);
     paylineCtx.lineCap = 'round'; paylineCtx.lineJoin = 'round';
+
+    var firstPt = true;
     for (var col = 0; col < line.length; col++) {
-      var x = col * cw + cw / 2;
-      var y = line[col] * ch + ch / 2;
-      if (col === 0) paylineCtx.moveTo(x, y); else paylineCtx.lineTo(x, y);
+      var row  = line[col];
+      var cell = document.getElementById('sc-' + col + '-' + row);
+      var x, y;
+      if (cell) {
+        var cr = cell.getBoundingClientRect();
+        x = (cr.left + cr.width  * 0.5 - canvasRect.left) * scaleX;
+        y = (cr.top  + cr.height * 0.5 - canvasRect.top)  * scaleY;
+      } else {
+        // Arithmetic fallback if cell element not found
+        var cw = paylineCanvas.width  / 5;
+        var ch = paylineCanvas.height / 3;
+        x = col * cw + cw * 0.5;
+        y = row * ch + ch * 0.5;
+      }
+      if (firstPt) { paylineCtx.moveTo(x, y); firstPt = false; }
+      else          { paylineCtx.lineTo(x, y); }
     }
     paylineCtx.stroke();
     paylineCtx.shadowBlur = 0;
@@ -624,25 +697,65 @@ var UI = (function() {
 
   /* pulseLockedCoins removed v6l52 — per owner: no glow animations in H&S */
 
-  var _HS_REEL_COINS = [
-    null,
-    { src: 'assets/symbols/gold_coin.svg' },
-    null,
-    { src: 'assets/symbols/jp_mini.svg'  },
-    null,
-    { src: 'assets/symbols/gold_coin.svg' },
-    null,
-    { src: 'assets/symbols/jp_minor.svg' },
-    { src: 'assets/symbols/jp_major.svg' },
-    null,
-    { src: 'assets/symbols/jp_grand.svg' },
-    null,
-  ];
+  // v7.0.5 — Dynamic belt builder. Called once at H&S start per session.
+  // entryJackpot: null | 'MINI'|'MINOR'|'MAJOR'|'GRAND' — awarded tier appears 3× in belt.
+  // Other JP tiers appear 0–1× based on random weighted roll (not every session).
+  // Belt: 18 slots per pass × 2 passes = 36 scrollable items.
+  // JP coins are decorative — they spin past but only award via unified entry check.
+  function _buildHSBelt(entryJackpot) {
+    var JP_SRCS = {
+      MINI:  'assets/symbols/jp_mini.svg',
+      MINOR: 'assets/symbols/jp_minor.svg',
+      MAJOR: 'assets/symbols/jp_major.svg',
+      GRAND: 'assets/symbols/jp_grand.svg',
+    };
+    var CASH_SRC = 'assets/symbols/gold_coin.svg';
+    var SLOTS = 18; // per pass
 
-  function startHoldSpinning(board, respinDisplay, emptyCount, isLastThree) {
+    // Decide which JP tiers appear in this session's belt (excluding the entry JP)
+    // Each non-entry tier has a 25% chance of appearing once
+    var guestJPs = [];
+    var tiers = ['MINI','MINOR','MAJOR','GRAND'];
+    for (var ti = 0; ti < tiers.length; ti++) {
+      var t = tiers[ti];
+      if (t === entryJackpot) continue; // handled separately
+      if (Math.random() < 0.25) guestJPs.push(t);
+    }
+
+    // Build the coin list for one pass:
+    // 6 CASH + entryJP×3 (if won) + guestJPs×1 each + fill rest with BLANKs
+    var items = [];
+    // Cash
+    for (var c = 0; c < 6; c++) items.push({ type:'cash', src: CASH_SRC });
+    // Entry JP — 3 copies if awarded
+    if (entryJackpot && JP_SRCS[entryJackpot]) {
+      for (var ej = 0; ej < 3; ej++) items.push({ type:'jp', level: entryJackpot, src: JP_SRCS[entryJackpot] });
+    }
+    // Guest JPs — 1 each
+    for (var gi = 0; gi < guestJPs.length; gi++) {
+      var gjp = guestJPs[gi];
+      items.push({ type:'jp', level: gjp, src: JP_SRCS[gjp] });
+    }
+    // Fill remaining slots with blanks
+    while (items.length < SLOTS) items.push(null);
+
+    // Shuffle positions
+    for (var si = items.length - 1; si > 0; si--) {
+      var sj = Math.floor(Math.random() * (si + 1));
+      var tmp = items[si]; items[si] = items[sj]; items[sj] = tmp;
+    }
+
+    return items; // 18 items, used for 2 passes in startHoldSpinning
+  }
+
+  // v7.0.5: accepts optional entryJackpot to build the dynamic belt
+  function startHoldSpinning(board, respinDisplay, emptyCount, isLastThree, entryJackpot) {
     var isNearMiss = (respinDisplay === 1);
     var isAnticip  = (emptyCount != null && emptyCount <= 2);
     var lastThree  = !!isLastThree;
+
+    // Build one shared belt for this respin (all cells use same composition)
+    var beltItems = _buildHSBelt(entryJackpot || null);
 
     for (var i = 0; i < board.length; i++) {
       if (board[i] !== null) continue;
@@ -650,7 +763,7 @@ var UI = (function() {
       if (!cell) continue;
 
       cell.innerHTML = '';
-      cell.classList.remove('spinning-cell', 'near-miss', 'anticipation', 'last-three');
+      cell.classList.remove('spinning-cell', 'near-miss', 'anticipation', 'last-three', 'decelerating');
 
       var strip = document.createElement('div');
       strip.className = 'hs-reel-strip';
@@ -670,14 +783,17 @@ var UI = (function() {
       else if (isAnticip)  strip.classList.add('anticipation');
       else if (isNearMiss) strip.classList.add('near-miss');
 
+      // 2 passes of the 18-slot belt
       for (var pass = 0; pass < 2; pass++) {
-        for (var ri = 0; ri < _HS_REEL_COINS.length; ri++) {
-          var def  = _HS_REEL_COINS[ri];
+        for (var ri = 0; ri < beltItems.length; ri++) {
+          var def  = beltItems[ri];
           var disc = document.createElement('div');
           disc.className = def ? 'hs-reel-coin' : 'hs-reel-blank';
           if (def) {
             var img = document.createElement('img');
-            img.src = def.src; img.className = 'hs-reel-coin-img'; img.draggable = false;
+            img.src = def.src;
+            img.className = 'hs-reel-coin-img';
+            img.draggable = false;
             disc.appendChild(img);
           }
           strip.appendChild(disc);
@@ -692,10 +808,23 @@ var UI = (function() {
     }
   }
 
+  // v7.0.5: decelerate then stop — strips slow to near-halt over 500ms before being removed.
+  // Replaces the instant clearHoldSpinning() wipe that made coins appear to drop after a dead stop.
+  function decelerateHoldSpinning(onDecelerationComplete) {
+    var strips = document.querySelectorAll('#hold-board .hold-cell.spinning-cell .hs-reel-strip');
+    for (var i = 0; i < strips.length; i++) {
+      strips[i].classList.add('decelerating');
+    }
+    setTimeout(function() {
+      clearHoldSpinning();
+      if (typeof onDecelerationComplete === 'function') onDecelerationComplete();
+    }, 500);
+  }
+
   function clearHoldSpinning() {
     var cells = document.querySelectorAll('#hold-board .hold-cell.spinning-cell');
     for (var i = 0; i < cells.length; i++) {
-      cells[i].classList.remove('spinning-cell', 'near-miss', 'anticipation', 'last-three');
+      cells[i].classList.remove('spinning-cell', 'near-miss', 'anticipation', 'last-three', 'decelerating');
       cells[i].innerHTML = '';
     }
   }
@@ -712,7 +841,7 @@ var UI = (function() {
     if (coinNumber === undefined) coinNumber = 0;
     var cell = $('hcell-' + pos);
     if (!cell) return;
-    cell.classList.remove('spinning-cell', 'near-miss', 'anticipation', 'last-three');
+    cell.classList.remove('spinning-cell', 'near-miss', 'anticipation', 'last-three', 'decelerating');
 
     if (isReplay) {
       _fillHoldCell(cell, coin);
@@ -724,24 +853,38 @@ var UI = (function() {
     var isHighValue = (!coin.isJackpotOrb && coin.value != null && coin.value >= 5);
 
     _fillHoldCell(cell, coin);
+
+    // v7.0.5 FIX — double-rAF guarantees the browser paints the initial position
+    // before the fall animation starts. await delay(30) was insufficient on Android.
     var coinWrap = cell.querySelector('.hs-coin-wrap');
     if (coinWrap) {
-      coinWrap.style.transform = isSixthCoin ? 'translateY(-220px) rotateY(0deg) scale(0.4)' : 'translateY(-160px) rotateY(0deg) scale(0.5)';
+      coinWrap.style.transform = isSixthCoin
+        ? 'translateY(-220px) rotateY(0deg) scale(0.4)'
+        : 'translateY(-160px) rotateY(0deg) scale(0.5)';
       coinWrap.style.opacity   = '0';
       coinWrap.style.animation = 'none';
     }
 
-    await delay(30);
+    await new Promise(function(resolve) {
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          // Second rAF: browser has committed the start-position paint
+          if (coinWrap) {
+            coinWrap.style.transform = '';
+            coinWrap.style.opacity   = '';
+            coinWrap.style.animation = '';
+          }
+          if (isSixthCoin) cell.classList.add('coin-slamming');
+          else             cell.classList.add('coin-dropping');
+          resolve();
+        });
+      });
+    });
 
-    if (coinWrap) {
-      coinWrap.style.transform = '';
-      coinWrap.style.opacity   = '';
-      coinWrap.style.animation = '';
-    }
-    if (isSixthCoin) cell.classList.add('coin-slamming');
-    else             cell.classList.add('coin-dropping');
-
-    var landDelay = isSixthCoin ? 560 : 420;
+    // v7.0.5 FIX — audio fires at CSS animation impact point, not at a fixed delay.
+    // coinFall (600ms): impact at 55% = 330ms
+    // coinSlam6 (880ms): impact at 58% = 510ms
+    var impactMs = isSixthCoin ? 510 : 330;
     setTimeout(function() {
       if (typeof Audio !== 'undefined' && Audio.play) {
         if (isSixthCoin)                             Audio.play('hold_spin_coin_slam');
@@ -781,7 +924,7 @@ var UI = (function() {
         if (cw) cw.classList.add('idle-spin');
       }, 420);
 
-    }, landDelay);
+    }, impactMs);
 
     await delay(isSixthCoin ? 1200 : 950);
   }
@@ -1331,31 +1474,8 @@ var UI = (function() {
     }
   }
 
-  async function showAdditionalRedSpinsWon(sourceLabel, roundIndex, totalRounds) {
-    var el = document.getElementById('additional-rs-banner');
-    if (!el) return;
-    var subEl = document.getElementById('additional-rs-sub');
-    if (subEl) {
-      var fromText  = sourceLabel ? 'From: ' + sourceLabel : '';
-      var roundText = totalRounds > 1 ? '  |  Round ' + roundIndex + ' of ' + totalRounds : '';
-      subEl.textContent = (fromText + roundText).trim() || 'Get Ready...';
-    }
-    var tapEl = document.getElementById('additional-rs-tap');
-    if (tapEl) tapEl.textContent = 'Starting Next Round...';
-    el.style.display   = 'flex';
-    el.style.opacity   = '0';
-    el.style.transform = 'scale(0.7)';
-    el.style.transition = 'opacity 0.35s ease, transform 0.35s cubic-bezier(0.22,1,0.36,1)';
-    await delay(30);
-    el.style.opacity   = '1';
-    el.style.transform = 'scale(1)';
-    await delay(2600);
-    el.style.opacity   = '0';
-    el.style.transform = 'scale(1.08)';
-    await delay(350);
-    el.style.display   = 'none';
-    el.style.transition = '';
-  }
+  // showAdditionalRedSpinsWon removed v6l106 — 0 callers, pendingRedSpins chain removed v6l97.
+
 
   function setControlsEnabled(enabled) {
     var ids = ['spin-btn','bet-up','bet-down','max-bet-btn','auto-btn'];
@@ -1452,7 +1572,8 @@ var UI = (function() {
     showRedSpinEntry: showRedSpinEntry, updateRedSpinWin: updateRedSpinWin, showRedSpinPaylineFlash: showRedSpinPaylineFlash,
     endRedSpin: endRedSpinBonus, endRedSpinBonus: endRedSpinBonus,
     showHoldSpinBoard: showHoldSpinBoard, animateHoldSpinning: animateHoldSpinning,
-    startHoldSpinning: startHoldSpinning, clearHoldSpinning: clearHoldSpinning, animateCoinLand: animateCoinLand,
+    startHoldSpinning: startHoldSpinning, clearHoldSpinning: clearHoldSpinning,
+    decelerateHoldSpinning: decelerateHoldSpinning, animateCoinLand: animateCoinLand,
     updateRespinCounter: updateRespinCounter, showBlackoutCelebration: showBlackoutCelebration,
     endHoldSpin: endHoldSpin, updateHoldTotal: updateHoldTotal,
     flashJackpotCoin: flashJackpotCoin, showHoldBonusWinScreen: showHoldBonusWinScreen,
@@ -1463,7 +1584,7 @@ var UI = (function() {
     showBonusOrbScreen: showBonusOrbScreen, revealBonusOrbs: revealBonusOrbs, endBonusOrbScreen: endBonusOrbScreen, setOrbTapCallback: setOrbTapCallback,
     showBonusLetterWin: showBonusLetterWin,
     flashReelRed: flashReelRed, activateRedScreen: activateRedScreen, deactivateRedScreen: deactivateRedScreen, endRedSpinImmediate: endRedSpinImmediate,
-    showAdditionalRedSpinsWon: showAdditionalRedSpinsWon, showRedSpinEndCelebration: showRedSpinEndCelebration,
+    showRedSpinEndCelebration: showRedSpinEndCelebration,
     showToast: showToast, showMessage: showMessage, onSpinStart: onSpinStart, onSpinComplete: onSpinComplete,
     clearPaylines: clearPaylines, showActivePaylines: showActivePaylines,
   };

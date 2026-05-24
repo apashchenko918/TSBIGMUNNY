@@ -478,15 +478,14 @@ overflow:hidden;
 /* Cell glow by tier — large warm glow bleeds across cell borders like reference */
 .hold-cell.cash   { box-shadow: 0 0 22px 8px  rgba(245,197,24,0.75),
                                 0 0 50px 4px  rgba(245,197,24,0.35); }
-.hold-cell.mini   { box-shadow: 0 0 22px 8px  rgba(255,221,0,0.80),
-                                0 0 50px 4px  rgba(255,221,0,0.40);  }  /* yellow */
+.hold-cell.mini   { box-shadow: 0 0 22px 8px  rgba(180,210,240,0.85),
+                                0 0 50px 4px  rgba(180,210,240,0.40); }  /* silver/white — distinct from cash gold */
 .hold-cell.minor  { box-shadow: 0 0 22px 8px  rgba(34,136,255,0.80),
                                 0 0 50px 4px  rgba(34,136,255,0.40); }  /* blue */
 .hold-cell.major  { box-shadow: 0 0 22px 8px  rgba(34,221,68,0.80),
                                 0 0 50px 4px  rgba(34,221,68,0.40);  }  /* green */
 .hold-cell.grand  { box-shadow: 0 0 28px 10px rgba(255,34,34,1),
                                 0 0 60px 6px  rgba(255,0,0,0.55);
-                    animation: grandCellPulse 0.75s ease-in-out infinite; position:relative; }
                     animation: grandCellPulse 0.75s ease-in-out infinite; position:relative; }
 /* ── JACKPOT METER FLASH — v6l97 ────────────────────────────────────
    When a jackpot is won, the relevant meter panel pulses red + glows.
@@ -626,14 +625,7 @@ overflow:hidden;
   z-index: 10;
   animation: sparkleOut 0.4s ease-out forwards;
 }
-@keyframes chipLand {
-  0%   { transform: translateY(-160px) rotateY(0deg) scale(0.5); opacity: 0; }
-  10%  { opacity: 1; }
-  55%  { transform: translateY(10px) rotateY(450deg) scale(1.08); }
-  70%  { transform: translateY(-5px) rotateY(490deg) scale(0.96); }
-  83%  { transform: translateY(4px)  rotateY(510deg) scale(1.03); }
-  100% { transform: translateY(0)    rotateY(540deg) scale(1); opacity: 1; }
-}
+/* chipLand animation — used by .hold-cell.landing .hs-coin-wrap */
 @keyframes chipLand {
   0%   { transform: translateY(-160px) rotateY(0deg) scale(0.5); opacity: 0; }
   10%  { opacity: 1; }
@@ -750,7 +742,7 @@ overflow:hidden;
 
 /* coinPulseShine removed v6l52 — per owner request: no glow animations in H&S */
 
-/* SO CLOSE removed v6l54 */ to{opacity:0;} }
+/* SO CLOSE removed v6l54 */
 
 /* Stronger value text contrast */
 .hs-c-val {
@@ -789,18 +781,14 @@ overflow:hidden;
   cursor:default;
 }
    Strip of coins scrolls downward (falling effect) continuously.
-   16 coins in strip (8 types × 2) — translateY(-50%→0) creates seamless loop.
+   12 stop types × 2 passes — translateY(-50%→0) creates seamless loop.
    ══════════════════════════════════════════════════════════════════ */
 
-/* ── EMPTY CELL WAITING STATE — dark recessed panel, no conveyor ─────
-   Matches reference: cells sit quietly. Subtle border pulse only.
-   ══════════════════════════════════════════════════════════════════ */
-
-/* Cell: dark waiting panel — no overflow clip, no mask, no strip */
-/* ══════════════════════════════════════════════════════════════════
-   H&S CONVEYOR BELT — Luxury Vault design
-   Strip of coins scrolls downward continuously.
-   12 stops × 2 passes = 24 items — translateY(-50%→0) seamless loop.
+/* ── H&S CONVEYOR BELT — Luxury Vault design ──────────────────────
+   Strip of coins scrolls downward continuously (reelFallDown animation).
+   Empty cells: dark recessed panel with star texture. Spinning cells:
+   overflow:hidden + mask to clip strip at top/bottom edges.
+   12 stop types × 2 passes = 24 items — translateY(-50%→0) seamless loop.
    ══════════════════════════════════════════════════════════════════ */
 
 /* Cell window — clips strip, fades top/bottom edges */
@@ -856,6 +844,13 @@ overflow:hidden;
 .hs-reel-strip.near-miss    { animation-duration: var(--reel-dur-nm,  5.0s); }
 .hs-reel-strip.anticipation { animation-duration: var(--reel-dur-ant, 1.5s); }
 .hs-reel-strip.last-three   { animation-duration: var(--reel-dur-lt,  3.6s); }
+/* v7.0.5 — deceleration before coin drop: eases from current speed to near-stop over 500ms */
+.hs-reel-strip.decelerating {
+  animation-duration: 14s;
+  -webkit-animation-duration: 14s;
+  transition: animation-duration 0.5s ease-out;
+  -webkit-transition: -webkit-animation-duration 0.5s ease-out;
+}
 
 /* Coin slot in strip */
 .hs-reel-coin {
@@ -1281,12 +1276,94 @@ overflow:hidden;
 
 
 /* ── LANDSCAPE ── */
-@media(orientation:landscape){
-  #game-wrap{flex-direction:row;max-width:900px;}
-  #jackpot-bar{flex-direction:column;width:160px;height:100%;min-height:unset;max-height:unset;}
-  #spin-btn{width:70px;height:70px;}
-  #title-banner { max-height:90px; }
-  #controls{height:auto;min-height:unset;max-height:unset;}
+/* ══════════════════════════════════════════════════════════════════════
+   DESKTOP & TABLET LAYOUT (v7.0.5)
+   ══════════════════════════════════════════════════════════════════════
+   Game is portrait-first (phone). On wider screens it centres as a tall
+   portrait column with a themed casino gutter behind it.
+   The broken landscape rule (moved JP bar to left column) is replaced here.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* OPTION C — gold diamond geometric pattern (default) ──────────────── */
+body.desktop-gutter-c {
+  background:
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 18px,
+      rgba(212,175,55,0.06) 18px,
+      rgba(212,175,55,0.06) 19px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 18px,
+      rgba(212,175,55,0.06) 18px,
+      rgba(212,175,55,0.06) 19px
+    ),
+    radial-gradient(ellipse at 50% 0%,   #1a0a25 0%, #0a0608 55%),
+    radial-gradient(ellipse at 50% 100%, #1a0812 0%, #0a0608 55%);
+}
+
+/* OPTION B — blurred splash image as gutter background ─────────────── */
+body.desktop-gutter-b::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: url('assets/splash_screen.jpg') center/cover no-repeat;
+  filter: blur(18px) brightness(0.22) saturate(1.4);
+  -webkit-filter: blur(18px) brightness(0.22) saturate(1.4);
+  transform: scale(1.08);
+  -webkit-transform: scale(1.08);
+  z-index: -1;
+}
+body.desktop-gutter-b {
+  background: transparent;
+}
+
+/* ── Desktop viewport: ≥ 700px wide ──────────────────────────────────
+   Portrait column centred. Scales up to fill screen height.            */
+@media (min-width: 700px) {
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  #game-wrap {
+    /* Scale column to fill screen height, cap at 560px wide */
+    width:  min(480px, calc(var(--real-vh, 100vh) * 0.48));
+    max-width: 560px;
+    height: var(--real-vh, 100vh);
+    max-height: var(--real-vh, 100vh);
+    flex-direction: column; /* always portrait — never row */
+    border-left:  2px solid rgba(212,175,55,0.35);
+    border-right: 2px solid rgba(212,175,55,0.35);
+    box-shadow:
+      -20px 0 60px rgba(0,0,0,0.6),
+       20px 0 60px rgba(0,0,0,0.6),
+        0   0 120px rgba(212,175,55,0.08);
+  }
+
+  /* JP bar stays horizontal at top — same as mobile */
+  #jackpot-bar {
+    flex-direction: row;
+    width: 100%;
+    height: 48px;
+    min-height: 44px;
+    max-height: 52px;
+  }
+}
+
+/* ── True mobile landscape (phone rotated) < 700px wide ─────────────
+   This is the only case that gets the side-by-side layout.            */
+@media (max-width: 699px) and (orientation: landscape) {
+  #game-wrap    { flex-direction: row; max-width: 900px; }
+  #jackpot-bar  { flex-direction: column; width: 140px; height: 100%; min-height: unset; max-height: unset; }
+  #spin-btn     { width: 66px; height: 66px; }
+  #title-banner { max-height: 80px; }
+  #controls     { height: auto; min-height: unset; max-height: unset; }
 }
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-track{background:#0d0510;}

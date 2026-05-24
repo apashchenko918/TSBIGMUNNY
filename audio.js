@@ -17,7 +17,7 @@
 
 const Audio = (() => {
   let ctx = null, masterGain = null;
-  let muted = false, volumeLevel = 0.70;
+  let muted = false, volumeLevel = 0.50; // v7.0.1 — reduced from 0.70 per owner
 
   // Background loop nodes
   let bgLoop = null, redLoop = null, holdLoop = null, pickLoop = null;
@@ -185,11 +185,11 @@ const Audio = (() => {
   const sounds = {
 
     spin() {
-      // Reel spin whoosh — synthesized
+      // Reel spin whoosh — synthesized (v7.0.3: volumes raised to audible level)
       if (!ctx) return;
-      const t = ctx.currentTime;
-      _noise(0.06, t, 0.25, 1100);
-      _tone(250, 'sawtooth', t, t + 0.15, 0.08, 0.001);
+      var t = ctx.currentTime;
+      _noise(0.22, t, 0.28, 1100);
+      _tone(240, 'sawtooth', t, t + 0.18, 0.22, 0.001);
     },
 
     reel_stop() {
@@ -218,8 +218,10 @@ const Audio = (() => {
     },
 
     button_click() {
+      // v7.0.3: gain raised 0.18→0.55, duration 0.05→0.10s — was inaudible
       if (!ctx) return;
-      _tone(600, 'sine', ctx.currentTime, ctx.currentTime + 0.05, 0.18, 0.001);
+      var t = ctx.currentTime;
+      _tone(600, 'sine', t, t + 0.10, 0.55, 0.001);
     },
 
     // Red Spin entry — Ring1 triple clang + siren sweep
@@ -355,6 +357,25 @@ const Audio = (() => {
     },
 
     // Jackpot sounds — escalating with Ring1 bells
+    credit_sweep() {
+      // Plays when player cashes out — coins sweeping away sound
+      // Uses available tones to create a descending sweep effect
+      var t = Audio_ctx();
+      if (!t) return;
+      var freqs = [880, 660, 440, 330, 220, 110];
+      freqs.forEach(function(freq, i) {
+        var osc = t.createOscillator();
+        var gain = t.createGain();
+        osc.connect(gain); gain.connect(t.destination);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        var start = t.currentTime + i * 0.06;
+        gain.gain.setValueAtTime(0.18, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.18);
+        osc.start(start); osc.stop(start + 0.2);
+      });
+    },
+
     jackpot_mini() {
       _play('ring1', 0.38);
       if (!ctx) return;

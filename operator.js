@@ -1,13 +1,13 @@
 'use strict';
 var Operator = (function() {
   function $(id) { return document.getElementById(id); }
-  let tapCount = 0, tapTimer = null;
-  let pinBuffer = '';
-  const CORRECT_PIN = '7777';
+  var tapCount = 0, tapTimer = null;
+  var pinBuffer = '';
+  var CORRECT_PIN = '7777';
 
   // ── TAP SEQUENCE DETECTION ───────────────────────────────────────────
   function initTapZone() {
-    const title = $('game-title');
+    var title = $('game-title');
     if (!title) return;
 
     function onTitleTap(e) {
@@ -32,20 +32,20 @@ var Operator = (function() {
   function showPinEntry() {
     pinBuffer = '';
     updatePinDisplay();
-    const overlay = $('pin-overlay');
+    var overlay = $('pin-overlay');
     if (overlay) overlay.classList.add('active');
-    const err = $('pin-error');
+    var err = $('pin-error');
     if (err) err.textContent = '';
   }
 
   function hidePinEntry() {
-    const overlay = $('pin-overlay');
+    var overlay = $('pin-overlay');
     if (overlay) overlay.classList.remove('active');
     pinBuffer = '';
   }
 
   function updatePinDisplay() {
-    const el = $('pin-display');
+    var el = $('pin-display');
     if (el) el.textContent = '●'.repeat(pinBuffer.length) || '';
   }
 
@@ -120,7 +120,11 @@ var Operator = (function() {
     if (op.forceFreeSpins)    armedList.push('P&C');
     if (op.forceBonusGame)    armedList.push('Hold & Spin');
     if (op.forceBonusFeature) armedList.push('BONUS Letters');
-    if (op.forceJackpot && op.forceJackpot !== 'none') armedList.push(op.forceJackpot + ' Jackpot');
+    if (op.forceJackpot && op.forceJackpot !== 'none') armedList.push(op.forceJackpot + ' JP');
+    // v7.0.1 — show jackpot queue in banner
+    if (op.forceJackpotQueue && op.forceJackpotQueue.length > 0) {
+      armedList.push('JP Queue: ' + op.forceJackpotQueue.join('+'));
+    }
 
     // Denom + bet for context
     var denomVal   = (typeof GameState.denom !== 'undefined') ? GameState.denom : 0.01;
@@ -187,7 +191,7 @@ var Operator = (function() {
     if (!(op._collapsed && op._collapsed['bonus'])) {
       h += '<div class="op-row"><span class="op-label">Bonus Freq Multiplier</span>';
       h += '<input class="op-input" id="op-bfreq" type="number" min="0.5" max="5" step="0.1" value="' + op.bonusFrequencyMultiplier.toFixed(1) + '"></div>';
-      h += '<div class="op-row"><span class="op-label">Red Spin Continuance % <span style="color:#aaa;font-size:9px">(70=default)</span></span>';
+      h += '<div class="op-row"><span class="op-label">Red Spin Continuance % <span style="color:#aaa;font-size:9px">(60=default)</span></span>';
       h += '<div style="display:flex;gap:4px;align-items:center"><input class="op-input" id="op-rscont" type="number" min="10" max="99" step="1" value="' + (op.redSpinContinuance*100).toFixed(0) + '" style="width:54px"><button class="op-btn" style="font-size:9px;padding:3px 6px" onclick="Operator.resetRedSpinContinuance()">RESET</button></div></div>';
       h += '<div class="op-row"><span class="op-label">Disable P&amp;C in Red Spin</span><button class="op-btn force-btn ' + (op.disablePickChooseInRedSpin?'armed':'') + '" data-fkey="disablePickChooseInRedSpin" onclick="Operator.toggleForce(this.dataset.fkey)">' + (op.disablePickChooseInRedSpin?'OFF':'ON') + '</button></div>';
       h += '<div class="op-row"><span class="op-label">Disable H&amp;S in Red Spin</span><button class="op-btn force-btn ' + (op.disableHoldSpinInRedSpin?'armed':'') + '" data-fkey="disableHoldSpinInRedSpin" onclick="Operator.toggleForce(this.dataset.fkey)">' + (op.disableHoldSpinInRedSpin?'OFF':'ON') + '</button></div>';
@@ -244,42 +248,101 @@ var Operator = (function() {
     }
     h += _secEnd('force');
 
-    // ── K2: COMBINED FORCE TRIGGER ──────────────────────────────────
-    h += _sec('combo', '⚡', 'COMBINED FORCE TRIGGER');
+    // ── K2: COMBINED FORCE TRIGGER (v7.0.2 — multi-bonus, tier-map, sweep mode) ──
+    h += _sec('combo', '\u26A1', 'COMBINED FORCE TRIGGER');
     if (!(op._collapsed && op._collapsed['combo'])) {
-      h += '<div style="font-size:9px;color:var(--text-dim);margin-bottom:6px">Arms a bonus trigger AND a jackpot type together. Both fire on the next spin.</div>';
+      var cm  = op.comboModes || { hold_spin:false, red_spin:false, pick_choose:false, bonus_letters:false };
+      var fq  = op.forceJackpotQueue || [];
+      var rtm = op.forceRSTierMap   || {};  // { 0:'MINI', 1:'MINOR', 2:'MAJOR', 3:'GRAND' }
+      var jpTierOpts = ['MINI','MINOR','MAJOR','GRAND'];
 
-      // Bonus selector
-      var comboBonus  = op.comboBonus  || 'hold_spin';
-      var comboJP     = op.comboJP     || 'MINI';
-      var bonusOpts   = [
-        { key:'hold_spin',    label:'Hold & Spin' },
-        { key:'red_spin',     label:'Red Spin'    },
-        { key:'pick_choose',  label:'Pick & Choose' },
-        { key:'bonus_letters',label:'BONUS Letters' },
-      ];
-      h += '<div class="op-row"><span class="op-label">Bonus Type</span></div>';
+      h += '<div style="font-size:9px;color:var(--text-dim);margin-bottom:6px">Select multiple bonuses. All fire sequentially on next spin. RS gets per-tier jackpot assignments.</div>';
+
+      // ── Bonus type multi-select ──
+      h += '<div style="font-size:9px;color:#ffcc44;margin-bottom:4px;font-weight:bold">\u25B6 BONUS TYPES (multi-select)</div>';
       h += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">';
-      for (var bi = 0; bi < bonusOpts.length; bi++) {
-        var bo  = bonusOpts[bi];
-        var bsel = comboBonus === bo.key ? ' armed' : '';
-        h += '<button class="op-btn force-btn' + bsel + '" style="flex:1;min-width:70px;font-size:10px" data-cb="' + bo.key + '" onclick="Operator.setComboBonus(this.dataset.cb)">' + (comboBonus === bo.key ? '✅ ' : '') + bo.label + '</button>';
+      var cBonusOpts = [
+        { key:'red_spin',      label:'Red Spin'     },
+        { key:'hold_spin',     label:'H&S'          },
+        { key:'bonus_letters', label:'BONUS Letters' },
+        { key:'pick_choose',   label:'P&C'          },
+      ];
+      for (var cbi = 0; cbi < cBonusOpts.length; cbi++) {
+        var cbo = cBonusOpts[cbi];
+        var cbOn = cm[cbo.key] ? true : false;
+        h += '<button class="op-btn force-btn' + (cbOn ? ' armed' : '') + '" style="flex:1;min-width:70px;font-size:10px" data-cbk="' + cbo.key + '" onclick="Operator.toggleComboBonus(this.dataset.cbk)">' + (cbOn ? '\u2705 ' : '') + cbo.label + '</button>';
       }
       h += '</div>';
 
-      // Jackpot selector
-      h += '<div class="op-row"><span class="op-label">Jackpot Level</span></div>';
-      h += '<div style="display:flex;gap:4px;margin-bottom:8px">';
-      for (var jci = 0; jci < jpKeys.length; jci++) {
-        var jck  = jpKeys[jci];
-        var jcsel = comboJP === jck ? ' armed' : '';
-        h += '<button class="op-btn force-btn' + jcsel + '" style="flex:1" data-cj="' + jck + '" onclick="Operator.setComboJP(this.dataset.cj)">' + (comboJP === jck ? '✅ ' : '') + jck + '</button>';
-      }
-      h += '</div>';
+      // ── RS Per-Tier Jackpot Map (only shown when Red Spin is selected) ──
+      if (cm.red_spin) {
+        h += '<div style="font-size:9px;color:#ff9966;margin-bottom:3px;font-weight:bold">\u25B6 RS JACKPOT PER TIER</div>';
+        h += '<div style="font-size:9px;color:var(--text-dim);margin-bottom:4px">Assign a jackpot to each RS tier. ARM ALL = T1\u2192MINI, T2\u2192MINOR, T3\u2192MAJOR, T4\u2192GRAND.</div>';
+        var tierLabels = ['T1 (SMALL)','T2 (MED)','T3 (LARGE)','T4 (SISTERS)'];
+        for (var ti = 0; ti < 4; ti++) {
+          var assigned = rtm[ti] || null;
+          h += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">';
+          h += '<span style="font-size:9px;color:#ffcc44;min-width:64px">' + tierLabels[ti] + '</span>';
+          for (var jpi = 0; jpi < jpTierOpts.length; jpi++) {
+            var jpo = jpTierOpts[jpi];
+            var jpOn = (assigned === jpo);
+            h += '<button class="op-btn force-btn' + (jpOn ? ' armed' : '') + '" style="flex:1;font-size:9px;padding:3px 2px" data-ti="' + ti + '" data-jp="' + jpo + '" onclick="Operator.setRSTierJP(parseInt(this.dataset.ti),this.dataset.jp)">' + (jpOn ? '\u2705' : '') + jpo + '</button>';
+          }
+          var clrOn = (!assigned);
+          h += '<button class="op-btn' + (clrOn ? '' : ' danger') + '" style="font-size:9px;padding:3px 5px" data-ti="' + ti + '" data-jp="" onclick="Operator.setRSTierJP(parseInt(this.dataset.ti),\'\')">CLR</button>';
+          h += '</div>';
+        }
+        h += '<div style="display:flex;gap:4px;margin-bottom:6px">';
+        h += '<button class="op-btn" style="flex:1;font-size:9px" onclick="Operator.armRSTierAll()">\u26A1 ARM ALL TIERS</button>';
+        h += '<button class="op-btn danger" style="flex:1;font-size:9px" onclick="Operator.clearRSTierMap()">CLEAR ALL</button>';
+        h += '</div>';
 
-      var comboArmed = op.comboArmed ? ' danger' : '';
-      var comboLabel = op.comboArmed ? '🔴 COMBO ARMED — DISARM' : '🚀 ARM COMBO';
-      h += '<button class="op-btn' + comboArmed + '" style="width:100%" onclick="Operator.armCombo()">' + comboLabel + '</button>';
+        // ── RS Sweep Mode ──────────────────────────────────────────────────
+        h += '<div style="font-size:9px;color:#ff9966;margin-bottom:3px;font-weight:bold">\u25B6 SWEEP MODE — Play all combos in tier</div>';
+        h += '<div style="font-size:9px;color:var(--text-dim);margin-bottom:4px">Plays one spin per winning symbol combination in the selected tier(s). Ascending rule suspended.</div>';
+        var sweepTier = (op.rsSweepTier !== undefined) ? op.rsSweepTier : -1;
+        var sweepTierOpts = [{v:-1,label:'ALL'},{v:0,label:'T1'},{v:1,label:'T2'},{v:2,label:'T3'},{v:3,label:'T4'}];
+        h += '<div style="display:flex;gap:4px;margin-bottom:4px">';
+        for (var sti = 0; sti < sweepTierOpts.length; sti++) {
+          var sto = sweepTierOpts[sti];
+          var stOn = (sweepTier === sto.v);
+          h += '<button class="op-btn force-btn' + (stOn ? ' armed' : '') + '" style="flex:1;font-size:9px" data-stv="' + sto.v + '" onclick="Operator.setSweepTier(parseInt(this.dataset.stv))">' + (stOn ? '\u2705 ' : '') + sto.label + '</button>';
+        }
+        h += '</div>';
+        h += '<button class="op-btn" style="width:100%;margin-bottom:6px;font-size:10px" onclick="Operator.armSweep()">\uD83D\uDD01 ARM SWEEP (runs when RS triggers)</button>';
+      }
+
+      // ── Jackpots for H&S / P&C (non-RS bonuses — uses queue) ──
+      if (cm.hold_spin || cm.pick_choose || cm.bonus_letters) {
+        h += '<div style="font-size:9px;color:#ffcc44;margin-bottom:4px;font-weight:bold">\u25B6 JACKPOTS for H&S / P&C (queued)</div>';
+        h += '<div style="display:flex;gap:4px;margin-bottom:2px">';
+        var jpQKeys2 = ['MINI','MINOR','MAJOR','GRAND'];
+        for (var qji = 0; qji < jpQKeys2.length; qji++) {
+          var qjk = jpQKeys2[qji];
+          var qjOn = (fq.indexOf(qjk) >= 0);
+          h += '<button class="op-btn force-btn' + (qjOn ? ' armed' : '') + '" style="flex:1" data-qjk="' + qjk + '" onclick="Operator.toggleComboJP(this.dataset.qjk)">' + (qjOn ? '\u2705 ' : '') + qjk + '</button>';
+        }
+        h += '</div>';
+        if (fq.length > 0) {
+          h += '<div style="font-size:9px;color:#80ff80;margin-bottom:4px">Queue: ' + fq.join(' \u2192 ') + '</div>';
+        }
+        h += '<div style="display:flex;gap:4px;margin-bottom:8px">';
+        for (var cxi = 0; cxi < ctxKeys.length; cxi++) {
+          var cxk = ctxKeys[cxi];
+          var cxOn = (op.forceJackpotContext === cxk);
+          h += '<button class="op-btn force-btn' + (cxOn ? ' armed' : '') + '" style="flex:1;font-size:9px" data-ctx="' + cxk + '" onclick="Operator.setJackpotContext(this.dataset.ctx)">' + (cxOn ? '\u2705 ' : '') + ctxLabels[cxk] + '</button>';
+        }
+        h += '</div>';
+      }
+
+      // ── ARM / DISARM ──
+      var anyBonusSel = cm.red_spin || cm.hold_spin || cm.pick_choose || cm.bonus_letters;
+      var comboBtnCls = op.comboArmed ? ' danger' : '';
+      var comboBtnLbl = op.comboArmed ? '\uD83D\uDD34 COMBO ARMED \u2014 DISARM' : '\uD83D\uDE80 ARM COMBO';
+      h += '<button class="op-btn' + comboBtnCls + '" style="width:100%" onclick="Operator.armCombo()">' + comboBtnLbl + '</button>';
+      if (!anyBonusSel && !op.comboArmed) {
+        h += '<div style="font-size:9px;color:var(--text-dim);text-align:center;margin-top:4px">Select at least one bonus type above</div>';
+      }
     }
     h += _secEnd('combo');
 
@@ -368,18 +431,18 @@ var Operator = (function() {
     var rtpEl  = $('op-rtp');
     var holdEl = $('op-hold');
     if (!rtpEl) return;
-    const rtp  = Math.min(99, Math.max(85, parseFloat(rtpEl.value) || 94));
-    const hold = parseFloat((100 - rtp).toFixed(1));
+    var rtp  = Math.min(99, Math.max(85, parseFloat(rtpEl.value) || 94));
+    var hold = parseFloat((100 - rtp).toFixed(1));
     GameState.operator.targetRTP      = rtp;
     GameState.operator.holdPercentage = hold;
     if (holdEl) holdEl.value = hold.toFixed(1);
 
     // Auto-adjust bonus frequency multiplier to push live RTP toward target
-    const liveRTP = getActualRTP();
+    var liveRTP = getActualRTP();
     if (liveRTP > 0) {
-      const diff = rtp - liveRTP;
+      var diff = rtp - liveRTP;
       // Positive diff = live is below target = increase bonus freq
-      const adj = 1.0 + (diff / 15.0);
+      var adj = 1.0 + (diff / 15.0);
       GameState.operator.bonusFrequencyMultiplier = Math.max(0.5, Math.min(5.0, parseFloat(adj.toFixed(1))));
     }
 
@@ -395,7 +458,7 @@ var Operator = (function() {
   }
 
   function applyBonusSettings() {
-    const op = GameState.operator;
+    var op = GameState.operator;
     op.bonusFrequencyMultiplier = Math.min(5, Math.max(0.5, parseFloat(($('op-bfreq')||{}).value) || 1));
     op.redSpinContinuance = Math.min(0.99, Math.max(0.1, (parseFloat(($('op-rscont')||{}).value)||65)/100));
     op.jackpotContribution = Math.min(0.1, Math.max(0.01, (parseFloat(($('op-jpct')||{}).value)||3)/100));
@@ -422,6 +485,15 @@ var Operator = (function() {
     op.forceBonusFeature = false;
     op.forceJackpot      = 'none';
     op.forceJackpotContext = 'bonus';
+    // v7.0.1 — also clear multi-jackpot queue, RS tier, combo modes
+    op.forceJackpotQueue = [];
+    op.comboArmed        = false;
+    var cm = op.comboModes;
+    if (cm) { cm.hold_spin = false; cm.red_spin = false; cm.pick_choose = false; cm.bonus_letters = false; }
+    // v7.0.2 — clear RS tier map and sweep mode
+    op.forceRSTierMap = {};
+    op.rsSweepMode    = false;
+    op.rsSweepTier    = -1;
     saveState();
     renderPanel();
     UI.showToast('All force triggers disarmed');
@@ -436,6 +508,82 @@ var Operator = (function() {
     renderPanel();
   }
 
+  // ── v7.0.2 RS tier jackpot map functions ─────────────────────────────
+  function setRSTierJP(tierIdx, jp) {
+    var op = GameState.operator;
+    if (!op.forceRSTierMap) op.forceRSTierMap = {};
+    op.forceRSTierMap[tierIdx] = jp || null;
+    saveState(); renderPanel();
+  }
+
+  function armRSTierAll() {
+    var op = GameState.operator;
+    op.forceRSTierMap = { 0:'MINI', 1:'MINOR', 2:'MAJOR', 3:'GRAND' };
+    saveState(); renderPanel();
+    UI.showToast('RS tiers armed: T1\u2192MINI T2\u2192MINOR T3\u2192MAJOR T4\u2192GRAND');
+  }
+
+  function clearRSTierMap() {
+    GameState.operator.forceRSTierMap = {};
+    saveState(); renderPanel();
+    UI.showToast('RS tier map cleared');
+  }
+
+  function setSweepTier(val) {
+    GameState.operator.rsSweepTier = val;
+    saveState(); renderPanel();
+  }
+
+  function armSweep() {
+    var op = GameState.operator;
+    op.rsSweepMode = true;
+    // Make sure Red Spin will trigger
+    if (!op.comboModes) op.comboModes = { hold_spin:false, red_spin:true, pick_choose:false, bonus_letters:false };
+    op.comboModes.red_spin  = true;
+    op.forceRedSpin = true;
+    op.comboArmed   = true;
+    saveState(); renderPanel();
+    UI.showToast('\uD83D\uDD01 Sweep armed — trigger Red Spin to run');
+  }
+
+  // ── v7.0.2 — update setRSTier to write into forceRSTierMap as well ──
+  function setRSTier(val) {
+    // Legacy single-tier setter — kept for any old callers
+    var op = GameState.operator;
+    if (!op.forceRSTierMap) op.forceRSTierMap = {};
+    // val: -1=any → clear map; 0-3 → set that tier from forceJackpotQueue[0]
+    if (val === -1) {
+      op.forceRSTierMap = {};
+    }
+    saveState(); renderPanel();
+  }
+  function toggleComboBonus(key) {
+    var op = GameState.operator;
+    if (!op.comboModes) op.comboModes = { hold_spin:false, red_spin:false, pick_choose:false, bonus_letters:false };
+    op.comboModes[key] = !op.comboModes[key];
+    saveState(); renderPanel();
+  }
+
+  // ── v7.0.1 COMBO: toggle a jackpot tier on/off in the queue ─────────
+  function toggleComboJP(tier) {
+    var op = GameState.operator;
+    if (!op.forceJackpotQueue) op.forceJackpotQueue = [];
+    var idx = op.forceJackpotQueue.indexOf(tier);
+    if (idx >= 0) {
+      op.forceJackpotQueue.splice(idx, 1);
+    } else {
+      op.forceJackpotQueue.push(tier);
+    }
+    saveState(); renderPanel();
+  }
+
+  // ── v7.0.1 COMBO: set RS tier for jackpot fire ──────────────────────
+  function setRSTier(val) {
+    GameState.operator.forceRSTier = val;
+    saveState(); renderPanel();
+  }
+
+  // Legacy single-select helpers (kept for backward compat / single-trigger section)
   function setComboBonus(val) {
     GameState.operator.comboBonus = val;
     saveState(); renderPanel();
@@ -456,21 +604,34 @@ var Operator = (function() {
       op.forceFreeSpins      = false;
       op.forceBonusFeature   = false;
       op.forceJackpot        = 'none';
+      op.forceJackpotQueue   = [];
       op.forceJackpotContext = 'bonus';
+      var cm = op.comboModes;
+      if (cm) { cm.hold_spin = false; cm.red_spin = false; cm.pick_choose = false; cm.bonus_letters = false; }
       saveState(); renderPanel();
+      UI.showToast('Combo disarmed');
       return;
     }
-    // Arm — set bonus force AND jackpot force
-    op.comboArmed = true;
-    var bonus = op.comboBonus || 'hold_spin';
-    op.forceBonusGame    = bonus === 'hold_spin';
-    op.forceRedSpin      = bonus === 'red_spin';
-    op.forceFreeSpins    = bonus === 'pick_choose';
-    op.forceBonusFeature = bonus === 'bonus_letters';
-    op.forceJackpot        = op.comboJP || 'MINI';
-    op.forceJackpotContext = 'bonus'; // fires inside the bonus
+    // ── Arm: read multi-select bonus and jackpot states ────────────────
+    var cm2 = op.comboModes || {};
+    var anyBonus = cm2.red_spin || cm2.hold_spin || cm2.pick_choose || cm2.bonus_letters;
+    if (!anyBonus) { UI.showToast('Select at least one bonus type first'); return; }
+    op.comboArmed        = true;
+    op.forceBonusGame    = !!cm2.hold_spin;
+    op.forceRedSpin      = !!cm2.red_spin;
+    op.forceFreeSpins    = !!cm2.pick_choose;
+    op.forceBonusFeature = !!cm2.bonus_letters;
+    // forceJackpotQueue is already populated by toggleComboJP — copy it fresh
+    if (!op.forceJackpotQueue) op.forceJackpotQueue = [];
+    // Build a human-readable summary for the toast
+    var armedBonuses = [];
+    if (cm2.red_spin)      armedBonuses.push('Red Spin');
+    if (cm2.hold_spin)     armedBonuses.push('H&S');
+    if (cm2.bonus_letters) armedBonuses.push('BONUS Letters');
+    if (cm2.pick_choose)   armedBonuses.push('P&C');
+    var jpSummary = op.forceJackpotQueue.length > 0 ? ' + JPs: ' + op.forceJackpotQueue.join(', ') : '';
     saveState(); renderPanel();
-    UI.showToast('⚡ COMBO ARMED: ' + bonus.replace('_',' ').toUpperCase() + ' + ' + op.forceJackpot);
+    UI.showToast('COMBO ARMED: ' + armedBonuses.join(' + ') + jpSummary);
   }
 
   function toggleForce(key) {
@@ -502,9 +663,9 @@ var Operator = (function() {
 
   // ── ARM JACKPOT — sets up force trigger based on context ──────────────
   function armJackpot() {
-    const op  = GameState.operator;
-    const jp  = op.forceJackpot;
-    const ctx = op.forceJackpotContext;
+    var op  = GameState.operator;
+    var jp  = op.forceJackpot;
+    var ctx = op.forceJackpotContext;
     if (jp === 'none') { UI.showToast('Select a jackpot type first'); return; }
 
     if (ctx === 'bonus') {
@@ -517,7 +678,7 @@ var Operator = (function() {
     } else {
       // BASE GAME: force reels to land 6+ Gold Coins so Hold & Spin triggers,
       // then jackpot fires inside that Hold & Spin
-      const coinStops = _findCoinStops(6);
+      var coinStops = _findCoinStops(6);
       if (!coinStops) {
         UI.showToast('Could not find 6-coin combo — try fewer coins');
         return;
@@ -543,12 +704,12 @@ var Operator = (function() {
   // For a 5-reel × 3-row grid that gives 5 coins. Then also try to get row 0/2
   // on a couple of reels to hit 6+.
   function _findCoinStops(minCoins) {
-    const COIN = 9; // BONUS_ID
+    var COIN = 9; // BONUS_ID
     // For each reel, collect all stops where each row shows a coin
     var reelCoinPositions = REEL_STRIPS.map(function(strip, col) {
-      const len = strip.length;
-      const positions = { row0: [], row1: [], row2: [] };
-      for (let stop = 0; stop < len; stop++) {
+      var len = strip.length;
+      var positions = { row0: [], row1: [], row2: [] };
+      for (var stop = 0; stop < len; stop++) {
         // buildGrid uses: row0 = (stop-1+len)%len, row1 = stop, row2 = (stop+1)%len
         if (strip[(stop - 1 + len) % len] === COIN) positions.row0.push(stop);
         if (strip[stop]                    === COIN) positions.row1.push(stop);
@@ -562,14 +723,14 @@ var Operator = (function() {
     var midStops = reelCoinPositions.map(function(p) { return p.row1[0] != null ? p.row1[0] : null; });
     if (midStops.every(function(s) { return s != null; })) {
       // All 5 middle rows = coins. Count actual grid coins for these stops.
-      let count = 5;
+      var count = 5;
       // Try to improve: swap a stop to one that also covers row0 or row2 coin
-      for (let col = 0; col < 5; col++) {
-        const strip = REEL_STRIPS[col];
-        const len   = strip.length;
-        for (const s of reelCoinPositions[col].row1) {
-          const r0coin = strip[(s - 1 + len) % len] === COIN;
-          const r2coin = strip[(s + 1) % len]       === COIN;
+      for (var col = 0; col < 5; col++) {
+        var strip = REEL_STRIPS[col];
+        var len   = strip.length;
+        for (var s of reelCoinPositions[col].row1) {
+          var r0coin = strip[(s - 1 + len) % len] === COIN;
+          var r2coin = strip[(s + 1) % len]       === COIN;
           if (r0coin || r2coin) { midStops[col] = s; count += (r0coin?1:0)+(r2coin?1:0); break; }
         }
       }
@@ -577,17 +738,17 @@ var Operator = (function() {
     }
 
     // Phase 2: fallback — try each reel's best available mid-row stop
-    const stops = [null, null, null, null, null];
-    let coinCount = 0;
-    for (let col = 0; col < 5; col++) {
-      const strip = REEL_STRIPS[col];
-      const len   = strip.length;
+    var stops = [null, null, null, null, null];
+    var coinCount = 0;
+    for (var col = 0; col < 5; col++) {
+      var strip = REEL_STRIPS[col];
+      var len   = strip.length;
       // Prefer a stop that has coin in all 3 rows
-      let best = null;
-      for (const s of reelCoinPositions[col].row1) {
-        const r0 = strip[(s - 1 + len) % len] === COIN;
-        const r2 = strip[(s + 1) % len]       === COIN;
-        const score = 1 + (r0?1:0) + (r2?1:0);
+      var best = null;
+      for (var s of reelCoinPositions[col].row1) {
+        var r0 = strip[(s - 1 + len) % len] === COIN;
+        var r2 = strip[(s + 1) % len]       === COIN;
+        var score = 1 + (r0?1:0) + (r2?1:0);
         if (!best || score > best.score) best = { s, score };
       }
       if (best) { stops[col] = best.s; coinCount += best.score; }
@@ -619,7 +780,7 @@ var Operator = (function() {
   }
 
   function setBalance() {
-    const val = parseFloat(($('op-bal')||{}).value) || GameState.operator.startingBalance;
+    var val = parseFloat(($('op-bal')||{}).value) || GameState.operator.startingBalance;
     GameState.balance = Math.max(0, val);
     GameState.operator.startingBalance = val;
     UI.updateBalance(GameState.balance);
@@ -653,7 +814,7 @@ var Operator = (function() {
 
   // ── EVENT LOG VIEWER ─────────────────────────────────────────────────
   function showLog(tab) { tab = tab || 'history';
-    const screen = $('log-screen');
+    var screen = $('log-screen');
     if (!screen) return;
     screen.classList.add('active');
     renderLogTab(tab);
@@ -665,7 +826,7 @@ var Operator = (function() {
     var winCls  = net >= 0 ? 'win' : 'loss';
     var netStr  = (net >= 0 ? '+' : '-') + '$' + Math.abs(net).toFixed(2);
     var betAmt  = (g.bet && g.bet.total != null) ? g.bet.total.toFixed(2) : '?';
-    var bonuses = (g.bonuses && g.bonuses.length) ? g.bonuses.map(function(b){return b.type;}).join(', ') : 'None';
+    var bonuses = (g.bonuses && g.bonuses.length) ? g.bonuses.map(function(b) {return b.type;}).join(', ') : 'None';
     var centerStr = (g.centerRow && g.centerRow.length) ? g.centerRow.join(' - ') : '—';
     var stopsStr  = (g.reelStops && g.reelStops.length) ? '[' + g.reelStops.join('-') + ']' : '';
     var denomStr  = g.denom ? (Math.round(g.denom * 100) + '¢') : '';
@@ -813,7 +974,7 @@ var Operator = (function() {
   }
 
   function closeLogScreen() {
-    const screen = $('log-screen');
+    var screen = $('log-screen');
     if (screen) screen.classList.remove('active');
   }
 
@@ -838,7 +999,7 @@ var Operator = (function() {
     });
 
     // Log screen close
-    const logClose = $('log-close');
+    var logClose = $('log-close');
     if (logClose) logClose.addEventListener('click', closeLogScreen);
     var logTabs = document.querySelectorAll('.log-tab');
     logTabs.forEach(function(tab) { tab.addEventListener('click', function() {
@@ -849,11 +1010,16 @@ var Operator = (function() {
   }
 
   return {
-    init, closePanel, showLog, confirmClearHistory,
-    applyRTP, applyBonusSettings, resetRedSpinContinuance, toggleForce, setForceJP,
-    selectJackpotType, setJackpotContext, armJackpot,
-    disarmAll, toggleSection, setComboBonus, setComboJP, armCombo,
-    applyReelStops, clearReelStops, setBalance,
-    resetJP, resetAllJP, resetGame,
+    init: init, closePanel: closePanel, showLog: showLog, confirmClearHistory: confirmClearHistory,
+    applyRTP: applyRTP, applyBonusSettings: applyBonusSettings, resetRedSpinContinuance: resetRedSpinContinuance,
+    toggleForce: toggleForce, setForceJP: setForceJP,
+    selectJackpotType: selectJackpotType, setJackpotContext: setJackpotContext, armJackpot: armJackpot,
+    disarmAll: disarmAll, toggleSection: toggleSection,
+    setComboBonus: setComboBonus, setComboJP: setComboJP, armCombo: armCombo,
+    toggleComboBonus: toggleComboBonus, toggleComboJP: toggleComboJP, setRSTier: setRSTier,
+    setRSTierJP: setRSTierJP, armRSTierAll: armRSTierAll, clearRSTierMap: clearRSTierMap,
+    setSweepTier: setSweepTier, armSweep: armSweep,
+    applyReelStops: applyReelStops, clearReelStops: clearReelStops, setBalance: setBalance,
+    resetJP: resetJP, resetAllJP: resetAllJP, resetGame: resetGame,
   };
 })();
